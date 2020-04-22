@@ -65,16 +65,15 @@ class FireServiceRotaIncidentsListener(Thread, websocket.WebSocketApp):
             elif message["type"] == "confirm_subscription":
                 _LOGGER.debug("Succesfully subscribed to incidents channel")
             elif message["type"] == "ping":
-                _LOGGER.debug("Got ping")
-                self.send(json.dumps({"type": "pong","message": message["message"]}))
+#                _LOGGER.debug("Answering ping with pong")
+#                self.send(json.dumps({"type": "pong","message": message["message"]}))
             else:
                 _LOGGER.debug(f"Received unknown type: {message}")
         except Exception as e:
             logging.exception(e)
 
-    def run_forever(self, sockopt=None, sslopt=None, ping_interval=0, ping_timeout=None):
-        websocket.setdefaulttimeout=1
-        websocket.enableTrace(True)
+    def run_forever(self, sockopt=None, sslopt=None, ping_interval=3, ping_timeout=None):
+        #websocket.enableTrace(True)
         websocket.WebSocketApp.run_forever(self, sockopt=sockopt, sslopt=sslopt, ping_interval=ping_interval,
                                            ping_timeout=ping_timeout)
 
