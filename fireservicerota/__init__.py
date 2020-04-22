@@ -65,7 +65,7 @@ class FireServiceRotaIncidentsListener(Thread, websocket.WebSocketApp):
             elif message["type"] == "confirm_subscription":
                 _LOGGER.debug("Succesfully subscribed to incidents channel")
             elif message["type"] == "ping":
-#                _LOGGER.debug("Answering ping with pong")
+                _LOGGER.debug("Received ping")
 #                self.send(json.dumps({"type": "pong","message": message["message"]}))
             else:
                 _LOGGER.debug(f"Received unknown type: {message}")
