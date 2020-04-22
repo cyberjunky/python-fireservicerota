@@ -47,7 +47,7 @@ setup(
        'oauthlib',
        'requests',
        'websocket-client',
-       'wsaccel',
-       'numpy'
+#       'wsaccel',
+#       'numpy'
     ]
 )

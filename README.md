@@ -20,8 +20,6 @@ pip3 install fireservicerota
 ## Usage
 
 ```python
-#!/usr/bin/env python3
-
 from fireservicerota import FireServiceRotaOAuth, FireServiceRotaOauthError, FireServiceRotaIncidentsListener
 import logging
 import sys
@@ -29,10 +27,7 @@ import json
 import time
 import threading
 
-"""
-Enable debug logging
-"""
-import logging
+_LOGGER = logging.getLogger(__name__)
 logging.basicConfig(level=logging.DEBUG)
 
 oauth = FireServiceRotaOAuth(
@@ -52,6 +47,7 @@ if not token_info:
 
 wsurl = f"wss://www.brandweerrooster.nl/cable?access_token={token_info['access_token']}"
 
+
 class FireService():
 
     def __init__(self):
@@ -68,24 +64,26 @@ class FireService():
 
     @property
     def data(self):
-        """Return the current data."""
+        """Return the current data stored in the provider."""
         return self._data
 
     def incidents_listener(self):
         """Spawn a new Listener and links it to self.on_incident."""
-        _LOGGER.debug("Starting a websocket listener")
+
+        _LOGGER.debug("Starting incidents listener")
         self.listener = FireServiceRotaIncidentsListener(url=wsurl, on_incident=self.on_incident)
 
-    try:
-        self.listener.run()
-        _LOGGER.debug("Reconnecting listener")
-    except:
-        pass
+        while True:
+            try:
+                self.listener.run_forever()
+            except:
+                pass
 
+
+ws = FireService()
 
 while True:
-    ws = FireService()
-
+  time.sleep(1)
 ```
 
 ## TODO
