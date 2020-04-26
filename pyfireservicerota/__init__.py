@@ -117,19 +117,18 @@ class FireServiceRotaOAuth():
          return parsed_response
 
 
-      def refresh_access_token(self, token_info):
+      def refresh_access_token(self, token_info, force=False):
          """Refresh access token if expired."""
          if token_info is None:
                return token_info
-         if not self.is_token_expired(token_info):
+         if not force:
+            if not self.is_token_expired(token_info):
                return token_info
 
          try:         
             oauth_client = oauthlib.oauth2.LegacyApplicationClient(self._client_id)
-            request_body = request_body = oauth_client.prepare_request_body(
-                     username=self._username, password=self._password)
             request_body = oauth_client.prepare_refresh_body(
-                     request_body, refresh_token=token_info['refresh_token'])
+                     refresh_token=token_info['refresh_token'])
             request_response = requests.post(url=self._authentication_url,
                      params=str.encode(request_body))
 

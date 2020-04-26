@@ -33,8 +33,8 @@ logging.basicConfig(level=logging.DEBUG)
 oauth = FireServiceRotaOAuth(
         "https://www.brandweerrooster.nl/oauth/token",
         "",
-        [CLIENT_ID],
-        [CLIENT_SECRET],
+        [USERNAME],
+        [PASSWORD],
     )
 
 try:
@@ -86,6 +86,24 @@ while True:
     time.sleep(1)
 ```
 
-## TODO
+Don't store user credentuals, just the token_info and use below code to refresh it, it will only fetch new token when it has expired.
+If you want to force a token refresh add True as param to oauth.refresh_acess_token()
+```
+oauth = FireServiceRotaOAuth(
+        "https://www.brandweerrooster.nl/oauth/token",
+        "",
+        "",
+        "",
+    )
 
-Implement Oauth refresh token
+try:
+    token_info = oauth.refresh_access_token(current_token_info)
+except FireServiceRotaOauthError:
+    token_info = None
+
+if not token_info:
+    _LOGGER.error("Failed to get access token")
+
+if token_info != current_token_info:
+    _LOGGER.error("Got new token, store it")
+```
