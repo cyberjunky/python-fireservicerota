@@ -11,7 +11,7 @@ from setuptools import setup
 def get_version():
     """Get current version from code."""
     regex = r"__version__\s=\s\"(?P<version>[\d\.]+?)\""
-    path = ("fireservicerota", "__version__.py")
+    path = ("pyfireservicerota", "__version__.py")
     return re.search(regex, read(*path)).group("version")
 
 
@@ -35,13 +35,13 @@ setup(
         "Operating System :: OS Independent",
     ],
     description="Python 3 API wrapper for FireServiceRota/BrandweerRooster",
-    name="fireservicerota",
+    name="pyfireservicerota",
     keywords=["fireservicerota", "brandweerrooster", "api", "client"],
     license="MIT license",
     long_description_content_type="text/markdown",
     long_description=readme,
     url="https://github.com/cyberjunky/python-fireservicerota",
-    packages=["fireservicerota"],
+    packages=["pyfireservicerota"],
     version=get_version(),
     install_requires=[
        'oauthlib',

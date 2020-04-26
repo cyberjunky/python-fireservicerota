@@ -11,6 +11,7 @@ from threading import Thread
 
 _LOGGER = logging.getLogger(__name__)
 
+
 class FireServiceRotaIncidentsListener(Thread, websocket.WebSocketApp):
     def __init__(self, url,
                  on_incident=None,
@@ -50,12 +51,14 @@ class FireServiceRotaIncidentsListener(Thread, websocket.WebSocketApp):
             if "type" not in message:
                 if "identifier" in message and json.loads(message["identifier"])["channel"] == "IncidentNotificationsChannel":
                     incident = message["message"]
-                    incident_id = incident["id"]
-                    if incident_id not in self._recent_incidents:
-                        self._recent_incidents.append(incident_id)
-                        self.on_incident(incident)
-                    else:
-                        _LOGGER.debug("Skipping duplicate incident")
+                    """skip messages without message_to_speech_url and address info"""
+                    if "address" in incident and "message_to_speech_url" in incident:
+                        incident_id = incident["id"]
+                        if incident_id not in self._recent_incidents:
+                            self._recent_incidents.append(incident_id)
+                            self.on_incident(incident)
+                        else:
+                            _LOGGER.debug("Skipping duplicate incident")
                 else:
                     _LOGGER.debug(f"Malformed data received\n{message}")
             elif message["type"] == "welcome":
@@ -72,7 +75,7 @@ class FireServiceRotaIncidentsListener(Thread, websocket.WebSocketApp):
         except Exception as e:
             logging.exception(e)
 
-    def run_forever(self, sockopt=None, sslopt=None, ping_interval=3, ping_timeout=None):
+    def run_forever(self, sockopt=None, sslopt=None, ping_interval=0, ping_timeout=None):
         #websocket.enableTrace(True)
         websocket.WebSocketApp.run_forever(self, sockopt=sockopt, sslopt=sslopt, ping_interval=ping_interval,
                                            ping_timeout=ping_timeout)

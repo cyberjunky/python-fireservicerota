@@ -4,23 +4,23 @@ Python 3 API wrapper for FireServiceRota and BrandweerRooster
 
 ## About
 
-This package allows you to get notified about emergency incidents from BrandweerRooster and FireServiceRota.
+This package allows you to get notified about emergency incidents from FireServiceRota.co.uk and BrandweerRooster.nl.
 Those are services used by firefighters.
 
-See https://brandweerrooster.nl for more details.
+See https://fireservicerota.co.uk and https://brandweerrooster.nl for more details.
 
 NOTE: You need a subscription and login account to be able to use it.
 
 ## Installation
 
 ```bash
-pip3 install fireservicerota
+pip3 install pyfireservicerota
 ```
 
 ## Usage
 
 ```python
-from fireservicerota import FireServiceRotaOAuth, FireServiceRotaOauthError, FireServiceRotaIncidentsListener
+from pyfireservicerota import FireServiceRotaOAuth, FireServiceRotaOauthError, FireServiceRotaIncidentsListener
 import logging
 import sys
 import json
@@ -83,7 +83,7 @@ class FireService():
 ws = FireService()
 
 while True:
-  time.sleep(1)
+    time.sleep(1)
 ```
 
 ## TODO
