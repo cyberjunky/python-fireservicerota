@@ -1,24 +1,247 @@
-# -*- coding: utf-8 -*-
 """Python 3 API wrapper for FireServiceRota and BrandweerRooster."""
+from typing import Optional
 import json
 import time
-import logging
 from collections import deque
 import oauthlib.oauth2
 import websocket
 import requests
 from threading import Thread
+import datetime
 
-_LOGGER = logging.getLogger(__name__)
+from typing import Optional
+from requests.exceptions import HTTPError, RequestException, Timeout
+
+from .const import (
+    _LOGGER,
+    FSR_DEFAULT_TIMEOUT,
+    FSR_ENDPOINT_TOKEN,
+    FSR_ENDPOINT_USER,
+    FSR_ENDPOINT_MEMBERSHIPS,
+)
+from .errors import FireServiceRotaError, InvalidAuthError, ExpiredTokenError, InvalidTokenError
 
 
-class FireServiceRotaIncidentsListener(Thread, websocket.WebSocketApp):
+class FireServiceRota(object):
+    """Class for communicating with the fireservicerota API."""
+
+    def __init__(self, base_url = None, username: str = None, password: str = None, token_info: dict = None):
+        """Init module"""
+
+        self._base_url = base_url
+        self._username = username
+        self._password = password
+        self._token_info = token_info
+
+        self._user = None
+
+
+    def request_tokens(self) -> bool:
+        """Get API tokens."""
+
+        oauth_client = oauthlib.oauth2.LegacyApplicationClient(client_id=None)
+        request_body = oauth_client.prepare_request_body(
+                 username=self._username, password=self._password)
+        response = self._request('POST', endpoint=FSR_ENDPOINT_TOKEN, log_msg_action='request tokens',
+                 params=str.encode(request_body), auth_request=True)
+
+        try:
+            self._token_info = response
+            _LOGGER.debug(f"Obtained tokens: access {self._token_info['access_token']}, "
+                          f"refresh {self._token_info['refresh_token']}")
+            return self._token_info
+        except (KeyError, TypeError) as err:
+            _LOGGER.debug(f"Error obtaining tokens: {err}")
+            return False
+
+
+    def refresh_tokens(self) -> bool:
+        """Refresh API tokens."""
+
+        if not self._token_info:
+           return
+
+        oauth_client = oauthlib.oauth2.LegacyApplicationClient(client_id=None)
+        request_body = oauth_client.prepare_refresh_body(
+                 refresh_token=self._token_info['refresh_token'])
+        response = self._request('POST', endpoint=FSR_ENDPOINT_TOKEN, log_msg_action='refresh tokens',
+                 params=str.encode(request_body), auth_request=True)
+
+        try:
+            self._token_info = response
+            _LOGGER.debug(f"Refreshed tokens: access {self._token_info['access_token']}, "
+                          f"refresh {self._token_info['refresh_token']}")
+            return self._token_info
+        except (KeyError, TypeError) as err:
+            _LOGGER.debug(f"Error refreshing tokens: {err}")
+            return False
+
+
+    def get_userid(self):
+        """Get user data."""
+
+        self._user = self._request('GET', endpoint=FSR_ENDPOINT_USER, log_msg_action='get userid',
+                 auth_request=False)
+
+        _LOGGER.debug(f"Userid data: {self._user}")
+
+
+    def get_schedules(self):
+        """Get user schedules."""
+
+        if not self._user:
+            self.get_userid()
+
+        today = datetime.date.today()
+        tomorrow = today + datetime.timedelta(days = 1)
+        id =  self._user['memberships'][0]['id']
+        url = FSR_ENDPOINT_MEMBERSHIPS.format(id, today, tomorrow)
+
+        response = self._request('GET', endpoint=url, log_msg_action='get memberships',
+                 auth_request=False)
+
+        return response
+
+
+    def get_availability(self):
+        """Get user availablity."""
+
+        if not self._user:
+            self.get_userid()
+
+        today = datetime.date.today()
+        tomorrow = today + datetime.timedelta(days = 1)
+
+        id =  self._user['memberships'][0]['id']
+        url = FSR_ENDPOINT_MEMBERSHIPS.format(id, today, tomorrow)
+
+        response = self._request('GET', endpoint=url, log_msg_action='get memberships',
+                 auth_request=False)
+
+        for interval in response['intervals']:
+          if interval['available'] == True:
+            now = datetime.datetime.now().astimezone()
+            if now > datetime.datetime.strptime(interval['start_time'], "%Y-%m-%dT%H:%M:%S.%f%z") and now < datetime.datetime.strptime(interval['end_time'], "%Y-%m-%dT%H:%M:%S.%f%z"):
+               if 'standby_duty' in interval['detailed_availability']:
+                   interval['type'] = 'standby_duty'
+               elif 'exception' in interval['detailed_availability']:
+                   interval['type'] = 'exception'
+               elif 'recurring' in interval['detailed_availability']:
+                   interval['type'] = 'recurring'
+               else:
+                   interval['type'] = 'unknown'
+
+               return interval
+
+        interval['available'] = False
+        return interval
+
+
+    def update(self):
+        return self.get_availability()
+
+
+    def _request(
+        self,
+        method: str,
+        endpoint: str,
+        log_msg_action: str,
+        params: dict = None,
+        body: dict = None,
+        auth_request: bool = False,
+    ) -> Optional[str]:
+        """Makes a request to the fireservicerota API."""
+        url = f"{self._base_url}/{endpoint}"
+        headers = dict()
+
+        if not auth_request:
+            url = f"{self._base_url}/api/v2/{endpoint}"
+            headers = {
+                "Content-Type": "application/json;charset=UTF-8",
+                "Authorization": f"Bearer {self._token_info['access_token']}",
+            }
+
+        _LOGGER.debug(
+            f"Making request to {endpoint} endpoint to {log_msg_action}: "
+            f"url: {url}, headers: {headers}, params: {params}, body: {body}"
+        )
+
+        try:
+            response = requests.request(
+                method, url, headers=headers, params=params, json=body, timeout=FSR_DEFAULT_TIMEOUT
+            )
+
+            try:
+                log_msg = response.json()
+            except:
+                log_msg = response.text
+            _LOGGER.debug(
+                f"Request response: {response.status_code}: {log_msg}"
+            )
+            
+            response.raise_for_status()
+            return response.json()
+        except HTTPError:
+            json_payload = {}
+            try:
+                json_payload = response.json()
+            except json.decoder.JSONDecodeError:
+                _LOGGER.debug("Invalid JSON payload received")
+
+            if auth_request:
+                if (
+                    response.status_code == 401
+                    and json_payload.get("error") == "invalid_grant"
+                ):
+                    raise InvalidAuthError(
+                        "fireservicerota invalid credentials or refresh token invalid"
+                    )
+                else:
+                    _LOGGER.error(
+                        f"Error requesting authorization from fireservicerota: "
+                        f"{response.status_code}: {json_payload}"
+                    )
+            elif response.status_code == 401:
+                error = json_payload.get("error")
+                if error == 'token_invalid':
+                    raise InvalidTokenError(
+                        "fireservicerota access token invalid; re-authentication required"
+                    )
+                elif error == 'token_revoked':
+                    raise ExpiredTokenError(
+                        "fireservicerota access token expired; token refresh required"
+                    )
+                else:
+                    _LOGGER.error(
+                        f"Error from fireservicerota while attempting to {log_msg_action}: "
+                        f"{error}: {json_payload.get('status', {}).get('message', 'Unknown error')}"
+                    )
+            else:
+                _LOGGER.error(
+                    f"Error from fireservicerota while attempting to {log_msg_action}: "
+                    f"{response.status_code}: {json_payload}"
+                )
+        except Timeout:
+            _LOGGER.error(
+                f"Connection to fireservicerrota timed out while attempting to {log_msg_action}. "
+                f"Possible connectivity outage."
+            )
+        except (RequestException, json.decoder.JSONDecodeError):
+            _LOGGER.error(
+                f"Error connecting to fireservicerota while attempting to {log_msg_action}. "
+                f"{response.status_code}: {json_payload}"
+            )
+        return None
+
+
+class FireServiceRotaIncidents(Thread, websocket.WebSocketApp):
     def __init__(self, url,
                  on_incident=None,
                  on_error=None,):
         """
         :param url: websocket url
         :param on_incident: function that get's called on received incident
+        :param on_error: function that get's called on error incident
         """
         self._url = url
         self.on_error = on_error
@@ -31,14 +254,12 @@ class FireServiceRotaIncidentsListener(Thread, websocket.WebSocketApp):
                                         on_close=self.on_close)
 
         self.connected = False
-        self.last_update = time.time()
         self.on_incident = on_incident
         self._recent_incidents = deque(maxlen=30)
 
     def on_open(self):
         _LOGGER.debug('Websocket open')
         self.connected = True
-        self.last_update = time.time()
 
     def on_close(self):
         _LOGGER.debug('Websocket closed')
@@ -68,97 +289,14 @@ class FireServiceRotaIncidentsListener(Thread, websocket.WebSocketApp):
             elif message["type"] == "confirm_subscription":
                 _LOGGER.debug("Succesfully subscribed to incidents channel")
             elif message["type"] == "ping":
-                _LOGGER.debug("Received ping")
-#                self.send(json.dumps({"type": "pong","message": message["message"]}))
+                 pass
             else:
                 _LOGGER.debug(f"Received unknown type: {message}")
         except Exception as e:
             logging.exception(e)
 
     def run_forever(self, sockopt=None, sslopt=None, ping_interval=0, ping_timeout=None):
-        #websocket.enableTrace(True)
+        #    websocket.enableTrace(True)
         websocket.WebSocketApp.run_forever(self, sockopt=sockopt, sslopt=sslopt, ping_interval=ping_interval,
                                            ping_timeout=ping_timeout)
-
-
-class FireServiceRotaOAuth():
-      """Implements Authorization Code Flow for FireServiceRota's OAuth implementation."""
-      def __init__(self, authentication_url=None, client_id=None, username=None, password=None):
-         """Init module"""
-         self._authentication_url = authentication_url
-         self._client_id = client_id
-         self._username = username
-         self._password = password
-
-
-      def get_access_token(self):
-         """Get access token."""
-         try:
-            oauth_client = oauthlib.oauth2.LegacyApplicationClient(self._client_id)
-            request_body = oauth_client.prepare_request_body(
-                     username=self._username, password=self._password)
-            request_response = requests.post(url=self._authentication_url,
-                     params=str.encode(request_body))
-
-            request_response.raise_for_status()
-
-         except requests.exceptions.HTTPError as errh:
-            raise FireServiceRotaOauthError(errh.response.text)
-         except requests.exceptions.ConnectionError as errc:
-            raise FireServiceRotaOauthError(errc.response.text)
-         except requests.exceptions.Timeout as errt:
-            raise FireServiceRotaOauthError(errt.response.text)
-         except requests.exceptions.RequestException as err:
-            raise FireServiceRotaOauthError(err.response.text)
-
-         parsed_response = oauth_client.parse_request_body_response(
-                     request_response.content)
-
-         return parsed_response
-
-
-      def refresh_access_token(self, token_info, force=False):
-         """Refresh access token if expired."""
-         if token_info is None:
-               return token_info
-         if not force:
-            if not self.is_token_expired(token_info):
-               return token_info
-
-         try:         
-            oauth_client = oauthlib.oauth2.LegacyApplicationClient(self._client_id)
-            request_body = oauth_client.prepare_refresh_body(
-                     refresh_token=token_info['refresh_token'])
-            request_response = requests.post(url=self._authentication_url,
-                     params=str.encode(request_body))
-
-            request_response.raise_for_status()
-
-         except requests.exceptions.HTTPError as errh:
-            raise FireServiceRotaOauthError(errh.response.text)
-         except requests.exceptions.ConnectionError as errc:
-            raise FireServiceRotaOauthError(errc.response.text)
-         except requests.exceptions.Timeout as errt:
-            raise FireServiceRotaOauthError(errt.response.text)
-         except requests.exceptions.RequestException as err:
-            raise FireServiceRotaOauthError(err.response.text)
-
-         parsed_response = oauth_client.parse_request_body_response(
-                     request_response.content)
-
-         return parsed_response
-
-
-      def is_token_expired(self, token_info):
-         """Check if auth token is expired."""
-         return token_info['expires_at'] - int(time.time()) < 60*60
-
-
-class FireServiceRotaOauthError(Exception):
-    """Raised when oauth returns wrong result."""
-
-    def __init__(self, status):
-        """Initialize."""
-        super(FireServiceRotaOauthError, self).__init__(status)
-        self.status = status
 

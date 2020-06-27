@@ -20,7 +20,7 @@ pip3 install pyfireservicerota
 ## Usage
 
 ```python
-from pyfireservicerota import FireServiceRotaOAuth, FireServiceRotaOauthError, FireServiceRotaIncidentsListener
+from pyfireservicerota import FireServiceRota, FireServiceRotaIncidents, FireServiceRotaError, ExpiredTokenError, InvalidTokenError, InvalidAuthError
 import logging
 import sys
 import json
@@ -30,23 +30,41 @@ import threading
 _LOGGER = logging.getLogger(__name__)
 logging.basicConfig(level=logging.DEBUG)
 
-oauth = FireServiceRotaOAuth(
-        "https://www.brandweerrooster.nl/oauth/token",
-        "",
-        [USERNAME],
-        [PASSWORD],
-    )
+api = FireServiceRota(
+      base_url="https://www.brandweerrooster.nl",
+      username="your@email.address",
+      password="yourpassword",
+)
 
 try:
-    token_info = oauth.get_access_token()
-except FireServiceRotaOauthError:
+    token_info = api.request_tokens()
+except InvalidAuthError:
     token_info = None
 
 if not token_info:
     _LOGGER.error("Failed to get access token")
 
-wsurl = f"wss://www.brandweerrooster.nl/cable?access_token={token_info['access_token']}"
+# Get userid to fetch availability
+try:
+    api.get_userid()
+except ExpiredTokenError:
+   _LOGGER.debug("Tokens are expired")
+   try:
+       token_info = api.refresh_tokens()
+   except InvalidAuthError:
+       _LOGGER.debug("Invalid refresh token")
+except InvalidTokenError:
+    _LOGGER.debug("Tokens are invalid")
+   try:
+       token_info = api.refresh_tokens()
+   except InvalidAuthError:
+       _LOGGER.debug("Invalid refresh token")
 
+#api.get_schedules()
+#print(api.get_availability())
+
+
+wsurl = f"wss://www.brandweerrooster.nl/cable?access_token={token_info['access_token']}"
 
 class FireService():
 
@@ -71,7 +89,7 @@ class FireService():
         """Spawn a new Listener and links it to self.on_incident."""
 
         _LOGGER.debug("Starting incidents listener")
-        self.listener = FireServiceRotaIncidentsListener(url=wsurl, on_incident=self.on_incident)
+        self.listener = FireServiceRotaIncidents(url=wsurl, on_incident=self.on_incident)
 
         while True:
             try:
@@ -86,24 +104,11 @@ while True:
     time.sleep(1)
 ```
 
-Don't store user credentuals, just the token_info and use below code to refresh it, it will only fetch new token when it has expired.
-If you want to force a token refresh add True as param to oauth.refresh_acess_token()
+Don't store user credentuals, just the token_info and use api.refresh_tokens to refresh it.
 ```
-oauth = FireServiceRotaOAuth(
-        "https://www.brandweerrooster.nl/oauth/token",
-        "",
-        "",
-        "",
+api = FireServiceRota(
+      base_url = "https://www.brandweerrooster.nl",
+      token_info = token_info
     )
 
-try:
-    token_info = oauth.refresh_access_token(current_token_info)
-except FireServiceRotaOauthError:
-    token_info = None
-
-if not token_info:
-    _LOGGER.error("Failed to get access token")
-
-if token_info != current_token_info:
-    _LOGGER.error("Got new token, store it")
 ```
