@@ -18,6 +18,9 @@ from .const import (
     FSR_ENDPOINT_TOKEN,
     FSR_ENDPOINT_USER,
     FSR_ENDPOINT_MEMBERSHIPS,
+    FSR_ENDPOINT_SKILLS,
+    FSR_ENDPOINT_DUTY_STANDBY_FUNCTIONS,
+    FSR_ENDPOINT_DUTY_STANDBY_FUNCTION,
 )
 from .errors import FireServiceRotaError, InvalidAuthError, ExpiredTokenError, InvalidTokenError
 
@@ -103,6 +106,28 @@ class FireServiceRota(object):
         return response
 
 
+    def get_skills(self):
+        """Get skills."""
+
+        url = FSR_ENDPOINT_SKILLS
+
+        response = self._request('GET', endpoint=url, log_msg_action='get skills',
+                 auth_request=False)
+
+        return response
+
+
+    def get_standby_function(self, id):
+        """Get standby function."""
+
+        url = FSR_ENDPOINT_DUTY_STANDBY_FUNCTION.format(id)
+
+        response = self._request('GET', endpoint=url, log_msg_action='get standby function',
+                 auth_request=False)
+
+        return response
+
+
     def get_availability(self):
         """Get user availablity."""
 
@@ -130,6 +155,10 @@ class FireServiceRota(object):
                    interval['type'] = 'recurring'
                else:
                    interval['type'] = 'unknown'
+
+               if interval['assigned_function_ids']:
+                   for func in interval['assigned_function_ids']:
+                       interval['assigned_function'] = self.get_standby_function(func)['name']
 
                return interval
 
