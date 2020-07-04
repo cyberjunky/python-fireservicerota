@@ -21,6 +21,8 @@ from .const import (
     FSR_ENDPOINT_SKILLS,
     FSR_ENDPOINT_DUTY_STANDBY_FUNCTIONS,
     FSR_ENDPOINT_DUTY_STANDBY_FUNCTION,
+    FSR_ENDPOINT_INCIDENT_RESPONSES,
+    FSR_ENDPOINT_INCIDENTS,
 )
 from .errors import FireServiceRotaError, InvalidAuthError, ExpiredTokenError, InvalidTokenError
 
@@ -128,6 +130,32 @@ class FireServiceRota(object):
         return response
 
 
+    def set_incident_response(self, id, status):
+        """Set incident response for one incident."""
+
+        url = FSR_ENDPOINT_INCIDENT_RESPONSES.format(id)
+        if status:
+            json = {'status': 'acknowledged'}
+        else:
+            json = {'status': 'rejected'}
+
+        self._request('POST', endpoint=url, log_msg_action='set incident response', params=json, auth_request=False)
+        
+
+    def get_incident_response(self, id):
+        """Get status of incident response for one incident."""
+
+        url = FSR_ENDPOINT_INCIDENTS.format(id)
+
+        response = self._request('GET', endpoint=url, log_msg_action='get incident response', auth_request=False)
+
+        for r in response['incident_responses']:
+           if self._user['id'] == r['user_id']:
+              return r['status']
+
+        return 'unknown'
+
+
     def get_availability(self):
         """Get user availablity."""
 
@@ -223,7 +251,7 @@ class FireServiceRota(object):
                     and json_payload.get("error") == "invalid_grant"
                 ):
                     raise InvalidAuthError(
-                        "fireservicerota invalid credentials or refresh token invalid"
+                        "Invalid credentials or refresh token invalid"
                     )
                 else:
                     _LOGGER.error(
@@ -234,30 +262,34 @@ class FireServiceRota(object):
                 error = json_payload.get("error")
                 if error == 'token_invalid':
                     raise InvalidTokenError(
-                        "fireservicerota access token invalid; re-authentication required"
+                        "Access token invalid; re-authentication required"
                     )
                 elif error == 'token_revoked':
                     raise ExpiredTokenError(
-                        "fireservicerota access token expired; token refresh required"
+                        "Access token revoked; token refresh required"
+                    )
+                elif error == 'token_expired':
+                    raise ExpiredTokenError(
+                        "Access token expired; token refresh required"
                     )
                 else:
                     _LOGGER.error(
-                        f"Error from fireservicerota while attempting to {log_msg_action}: "
+                        f"Error while attempting to {log_msg_action}: "
                         f"{error}: {json_payload.get('status', {}).get('message', 'Unknown error')}"
                     )
             else:
                 _LOGGER.error(
-                    f"Error from fireservicerota while attempting to {log_msg_action}: "
+                    f"Error while attempting to {log_msg_action}: "
                     f"{response.status_code}: {json_payload}"
                 )
         except Timeout:
             _LOGGER.error(
-                f"Connection to fireservicerrota timed out while attempting to {log_msg_action}. "
+                f"Connection timed out while attempting to {log_msg_action}. "
                 f"Possible connectivity outage."
             )
         except (RequestException, json.decoder.JSONDecodeError):
             _LOGGER.error(
-                f"Error connecting to fireservicerota while attempting to {log_msg_action}. "
+                f"Error connecting while attempting to {log_msg_action}. "
                 f"{response.status_code}: {json_payload}"
             )
         return None
@@ -266,7 +298,7 @@ class FireServiceRota(object):
 class FireServiceRotaIncidents(Thread, websocket.WebSocketApp):
     def __init__(self, url,
                  on_incident=None,
-                 on_error=None,):
+                 on_error=None):
         """
         :param url: websocket url
         :param on_incident: function that get's called on received incident
@@ -292,6 +324,7 @@ class FireServiceRotaIncidents(Thread, websocket.WebSocketApp):
 
     def on_close(self):
         _LOGGER.debug('Websocket closed')
+        self.on_error()
         self.connected = False
 
     def on_message(self, message):
@@ -325,7 +358,7 @@ class FireServiceRotaIncidents(Thread, websocket.WebSocketApp):
             logging.exception(e)
 
     def run_forever(self, sockopt=None, sslopt=None, ping_interval=0, ping_timeout=None):
-        #    websocket.enableTrace(True)
+        #websocket.enableTrace(True)
         websocket.WebSocketApp.run_forever(self, sockopt=sockopt, sslopt=sslopt, ping_interval=ping_interval,
                                            ping_timeout=ping_timeout)
 

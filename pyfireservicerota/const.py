@@ -10,3 +10,5 @@ FSR_ENDPOINT_MEMBERSHIPS = "memberships/{}/combined_schedule?start_time={}&end_t
 FSR_ENDPOINT_SKILLS = "skills"
 FSR_ENDPOINT_DUTY_STANDBY_FUNCTIONS = "standby_duty_functions"
 FSR_ENDPOINT_DUTY_STANDBY_FUNCTION = "standby_duty_functions/{}"
+FSR_ENDPOINT_INCIDENT_RESPONSES = "incidents/{}/incident_responses"
+FSR_ENDPOINT_INCIDENTS = "incidents/{}"
