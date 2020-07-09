@@ -37,7 +37,6 @@ class FireServiceRota(object):
         self._username = username
         self._password = password
         self._token_info = token_info
-
         self._user = None
 
 
@@ -82,7 +81,7 @@ class FireServiceRota(object):
             return False
 
 
-    def get_userid(self):
+    def _get_userid(self):
         """Get user data."""
 
         self._user = self._request('GET', endpoint=FSR_ENDPOINT_USER, log_msg_action='get userid',
@@ -95,7 +94,7 @@ class FireServiceRota(object):
         """Get user schedules."""
 
         if not self._user:
-            self.get_userid()
+            self._get_userid()
 
         today = datetime.date.today()
         tomorrow = today + datetime.timedelta(days = 1)
@@ -111,9 +110,7 @@ class FireServiceRota(object):
     def get_skills(self):
         """Get skills."""
 
-        url = FSR_ENDPOINT_SKILLS
-
-        response = self._request('GET', endpoint=url, log_msg_action='get skills',
+        response = self._request('GET', endpoint=FSR_ENDPOINT_SKILLS, log_msg_action='get skills',
                  auth_request=False)
 
         return response
@@ -134,6 +131,7 @@ class FireServiceRota(object):
         """Set incident response for one incident."""
 
         url = FSR_ENDPOINT_INCIDENT_RESPONSES.format(id)
+
         if status:
             json = {'status': 'acknowledged'}
         else:
@@ -160,7 +158,7 @@ class FireServiceRota(object):
         """Get user availablity."""
 
         if not self._user:
-            self.get_userid()
+            self._get_userid()
 
         today = datetime.date.today()
         tomorrow = today + datetime.timedelta(days = 1)
@@ -296,8 +294,10 @@ class FireServiceRota(object):
 
 
 class FireServiceRotaIncidents(Thread, websocket.WebSocketApp):
+
     def __init__(self, url,
                  on_incident=None,
+                 on_close=None,
                  on_error=None):
         """
         :param url: websocket url
@@ -306,26 +306,22 @@ class FireServiceRotaIncidents(Thread, websocket.WebSocketApp):
         """
         self._url = url
         self.on_error = on_error
+        self.on_close = on_close
 
         Thread.__init__(self)
-        websocket.WebSocketApp.__init__(self, self._url,
+        websocket.WebSocketApp.__init__(self, url,
                                         on_open=self.on_open,
                                         on_error=self.on_error,
                                         on_message=self.on_message,
                                         on_close=self.on_close)
 
-        self.connected = False
         self.on_incident = on_incident
         self._recent_incidents = deque(maxlen=30)
 
+
     def on_open(self):
         _LOGGER.debug('Websocket open')
-        self.connected = True
 
-    def on_close(self):
-        _LOGGER.debug('Websocket closed')
-        self.on_error()
-        self.connected = False
 
     def on_message(self, message):
         _LOGGER.debug('Websocket data:' + message)
@@ -357,8 +353,9 @@ class FireServiceRotaIncidents(Thread, websocket.WebSocketApp):
         except Exception as e:
             logging.exception(e)
 
+
     def run_forever(self, sockopt=None, sslopt=None, ping_interval=0, ping_timeout=None):
-        #websocket.enableTrace(True)
+#        websocket.enableTrace(True)
         websocket.WebSocketApp.run_forever(self, sockopt=sockopt, sslopt=sslopt, ping_interval=ping_interval,
                                            ping_timeout=ping_timeout)
 
