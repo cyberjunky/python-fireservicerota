@@ -8,12 +8,12 @@ import websocket
 import requests
 from threading import Thread
 import datetime
+import logging
 
 from typing import Optional
 from requests.exceptions import HTTPError, RequestException, Timeout
 
 from .const import (
-    _LOGGER,
     FSR_DEFAULT_TIMEOUT,
     FSR_ENDPOINT_TOKEN,
     FSR_ENDPOINT_USER,
@@ -26,6 +26,7 @@ from .const import (
 )
 from .errors import FireServiceRotaError, InvalidAuthError, ExpiredTokenError, InvalidTokenError
 
+_LOGGER = logging.getLogger("pyfireservicerota")
 
 class FireServiceRota(object):
     """Class for communicating with the fireservicerota API."""
@@ -41,7 +42,7 @@ class FireServiceRota(object):
 
 
     def request_tokens(self) -> bool:
-        """Get API tokens."""
+        """Request API tokens."""
 
         oauth_client = oauthlib.oauth2.LegacyApplicationClient(client_id=None)
         request_body = oauth_client.prepare_request_body(
@@ -60,7 +61,7 @@ class FireServiceRota(object):
 
 
     def refresh_tokens(self) -> bool:
-        """Refresh API tokens."""
+        """Refresh existing API tokens."""
 
         if not self._token_info:
            return
@@ -96,10 +97,10 @@ class FireServiceRota(object):
         if not self._user:
             self._get_userid()
 
-        today = datetime.date.today()
+        today = datetime.datetime.now().astimezone()
         tomorrow = today + datetime.timedelta(days = 1)
         id =  self._user['memberships'][0]['id']
-        url = FSR_ENDPOINT_MEMBERSHIPS.format(id, today, tomorrow)
+        url = FSR_ENDPOINT_MEMBERSHIPS.format(id, today.strftime("%Y-%m-%dT00:00:00%z"), tomorrow.strftime("%Y-%m-%dT00:00:00%z"))
 
         response = self._request('GET', endpoint=url, log_msg_action='get memberships',
                  auth_request=False)
@@ -149,9 +150,9 @@ class FireServiceRota(object):
 
         for r in response['incident_responses']:
            if self._user['id'] == r['user_id']:
-              return r['status']
+              return r
 
-        return 'unknown'
+        return None
 
 
     def get_availability(self):
@@ -160,40 +161,38 @@ class FireServiceRota(object):
         if not self._user:
             self._get_userid()
 
-        today = datetime.date.today()
+        today = datetime.datetime.now().astimezone()
         tomorrow = today + datetime.timedelta(days = 1)
 
         id =  self._user['memberships'][0]['id']
-        url = FSR_ENDPOINT_MEMBERSHIPS.format(id, today, tomorrow)
+        url = FSR_ENDPOINT_MEMBERSHIPS.format(id, today.strftime("%Y-%m-%dT00:00:00%z"), tomorrow.strftime("%Y-%m-%dT00:00:00%z"))
 
         response = self._request('GET', endpoint=url, log_msg_action='get memberships',
                  auth_request=False)
 
-        for interval in response['intervals']:
-          if interval['available'] == True:
-            now = datetime.datetime.now().astimezone()
-            if now > datetime.datetime.strptime(interval['start_time'], "%Y-%m-%dT%H:%M:%S.%f%z") and now < datetime.datetime.strptime(interval['end_time'], "%Y-%m-%dT%H:%M:%S.%f%z"):
-               if 'standby_duty' in interval['detailed_availability']:
-                   interval['type'] = 'standby_duty'
-               elif 'exception' in interval['detailed_availability']:
-                   interval['type'] = 'exception'
-               elif 'recurring' in interval['detailed_availability']:
-                   interval['type'] = 'recurring'
-               else:
-                   interval['type'] = 'unknown'
+        if response:
+            for interval in response['intervals']:
+                if interval['available'] == True:
+                    now = datetime.datetime.now().astimezone()
+                    if now > datetime.datetime.strptime(interval['start_time'], "%Y-%m-%dT%H:%M:%S.%f%z") and now < datetime.datetime.strptime(interval['end_time'], "%Y-%m-%dT%H:%M:%S.%f%z"):
+                        if 'standby_duty' in interval['detailed_availability']:
+                            interval['type'] = 'standby_duty'
+                        elif 'exception' in interval['detailed_availability']:
+                            interval['type'] = 'exception'
+                        elif 'recurring' in interval['detailed_availability']:
+                            interval['type'] = 'recurring'
+                        else:
+                            interval['type'] = 'unknown'
 
-               if interval['assigned_function_ids']:
-                   for func in interval['assigned_function_ids']:
-                       interval['assigned_function'] = self.get_standby_function(func)['name']
+                        if interval['assigned_function_ids']:
+                            for func in interval['assigned_function_ids']:
+                                interval['assigned_function'] = self.get_standby_function(func)['name']
 
-               return interval
+                        return interval
 
+        interval = {}
         interval['available'] = False
         return interval
-
-
-    def update(self):
-        return self.get_availability()
 
 
     def _request(
@@ -351,7 +350,7 @@ class FireServiceRotaIncidents(Thread, websocket.WebSocketApp):
             else:
                 _LOGGER.debug(f"Received unknown type: {message}")
         except Exception as e:
-            logging.exception(e)
+            _LOGGER.exception(e)
 
 
     def run_forever(self, sockopt=None, sslopt=None, ping_interval=0, ping_timeout=None):
