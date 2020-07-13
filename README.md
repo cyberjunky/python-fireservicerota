@@ -25,7 +25,7 @@ pip3 install pyfireservicerota
 
 ## Usage
 
-# Initialise module using user credentials to get token_info
+### Initialise module using user credentials to get token_info
 ```python
 from pyfireservicerota import FireServiceRota, FireServiceRotaIncidents, FireServiceRotaError, ExpiredTokenError, InvalidTokenError, InvalidAuthError
 import logging
@@ -56,7 +56,7 @@ if not token_info:
 
 NOTE: You don't need to store user credentials, at first authentication just the token_info dictionary is enough use api.refresh_tokens to refresh it.
 
-# Initialise module with stored token_info
+### Initialise module with stored token_info
 ```python
 from pyfireservicerota import FireServiceRota, FireServiceRotaIncidents, FireServiceRotaError, ExpiredTokenError, InvalidTokenError, InvalidAuthError
 import logging
