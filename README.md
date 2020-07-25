@@ -4,7 +4,7 @@ Basic Python 3 API wrapper for FireServiceRota and BrandweerRooster for use with
 
 ## About
 
-This package allows you to get notified about emergency incidents from FireServiceRota.co.uk and BrandweerRooster.nl.
+This package allows you to get notified about emergency incidents from https://www.FireServiceRota.co.uk and https://www.BrandweerRooster.nl.
 Those are services used by firefighters.
 
 It currently provides the following limited functionality:
@@ -27,7 +27,7 @@ pip3 install pyfireservicerota
 
 # Initialise module using user credentials to get token_info
 ```python
-from pyfireservicerota import FireServiceRota, FireServiceRotaIncidents, FireServiceRotaError, ExpiredTokenError, InvalidTokenError, InvalidAuthError
+from pyfireservicerota import FireServiceRota, FireServiceRotaIncidents, ExpiredTokenError, InvalidTokenError, InvalidAuthError
 import logging
 import sys
 import json
@@ -58,7 +58,7 @@ NOTE: You don't need to store user credentials, at first authentication just the
 
 # Initialise module with stored token_info
 ```python
-from pyfireservicerota import FireServiceRota, FireServiceRotaIncidents, FireServiceRotaError, ExpiredTokenError, InvalidTokenError, InvalidAuthError
+from pyfireservicerota import FireServiceRota, FireServiceRotaIncidents, ExpiredTokenError, InvalidTokenError, InvalidAuthError
 import logging
 import sys
 import json
@@ -74,38 +74,6 @@ api = FireServiceRota(
       base_url = "https://www.brandweerrooster.nl",
       token_info = token_info
     )
-
-# Get userid to fetch availability
-try:
-   print(api.get_userid())
-except ExpiredTokenError:
-   _LOGGER.debug("Tokens are expired, refreshing")
-   try:
-       token_info = api.refresh_tokens()
-   except InvalidAuthError:
-       _LOGGER.debug("Invalid refresh token, you need to re-login")
-except InvalidTokenError:
-    _LOGGER.debug("Tokens are invalid")
-   try:
-       token_info = api.refresh_tokens()
-   except InvalidAuthError:
-       _LOGGER.debug("Invalid refresh token, you need to re-login")
-
-# Get user schedules
-try:
-   print(api.get_schedules())
-except ExpiredTokenError:
-   _LOGGER.debug("Tokens are expired, refreshing")
-   try:
-       token_info = api.refresh_tokens()
-   except InvalidAuthError:
-       _LOGGER.debug("Invalid refresh token, you need to re-login")
-except InvalidTokenError:
-    _LOGGER.debug("Tokens are invalid")
-   try:
-       token_info = api.refresh_tokens()
-   except InvalidAuthError:
-       _LOGGER.debug("Invalid refresh token, you need to re-login")
 
 # Get user availability (duty)
 try:
@@ -125,10 +93,10 @@ except InvalidTokenError:
 
 # Get incident response status for incident with id 123456
 
-id = 123456
+incident_id = 123456
 
 try:
-   print(api.get_incident_response(id))
+   print(api.get_incident_response(incident_id))
 except ExpiredTokenError:
    _LOGGER.debug("Tokens are expired, refreshing")
    try:
@@ -182,7 +150,6 @@ class FireService():
 
     def on_close(self):
         _LOGGER.debug("Websocket closed")
-        return
 
     def incidents_listener(self):
         """Spawn a new Listener and links it to self.on_incident."""
@@ -198,4 +165,3 @@ ws = FireService()
 while True:
     time.sleep(1)
 ```
-
