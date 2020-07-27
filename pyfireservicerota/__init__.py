@@ -2,6 +2,7 @@
 import datetime
 import json
 import logging
+import pytz
 from collections import deque
 from threading import Thread
 from typing import Optional
@@ -102,12 +103,13 @@ class FireServiceRota(object):
             auth_request=False,
         )
 
-    def get_schedules(self):
+    def get_schedules(self, tz):
         """Get user schedules."""
         if not self._user:
             self._get_userid()
 
-        today = datetime.datetime.now().astimezone()
+        #today = datetime.datetime.now(tz) #.astimezone()
+        today = datetime.datetime.now(tz)
         tomorrow = today + datetime.timedelta(days=1)
         id = self._user["memberships"][0]["id"]
         endpoint = FSR_ENDPOINT_MEMBERSHIPS.format(id)
@@ -185,9 +187,10 @@ class FireServiceRota(object):
 
         return None
 
-    def get_availability(self):
+    def get_availability(self, tzstring):
         """Get user availablity."""
-        response = self.get_schedules()
+        tz = pytz.timezone(tzstring)
+        response = self.get_schedules(tz)
 
         if response:
             for interval in response["intervals"]:

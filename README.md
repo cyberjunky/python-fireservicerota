@@ -77,7 +77,7 @@ api = FireServiceRota(
 
 # Get user availability (duty)
 try:
-   print(api.get_availability())
+   print(api.get_availability('Europe/Amsterdam'))
 except ExpiredTokenError:
    _LOGGER.debug("Tokens are expired, refreshing")
    try:

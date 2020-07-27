@@ -44,6 +44,7 @@ setup(
     packages=["pyfireservicerota"],
     version=get_version(),
     install_requires=[
+       'pytz',
        'oauthlib',
        'requests',
        'websocket-client',
