@@ -63,7 +63,7 @@ import logging
 import sys
 import json
 import time
-import threading
+
 
 _LOGGER = logging.getLogger(__name__)
 logging.basicConfig(level=logging.DEBUG)
@@ -133,34 +133,26 @@ wsurl = f"wss://www.brandweerrooster.nl/cable?access_token={token_info['access_t
 
 class FireService():
 
-    def __init__(self):
+    def __init__(self, url):
 
         self._data = None
         self.listener = None
-        self.thread = threading.Thread(target=self.incidents_listener)
-        self.thread.daemon = True
-        self.thread.start()
+        self.url = url
+        self.incidents_listener()
 
     def on_incident(self, data):
         _LOGGER.debug("INCIDENT: %s", data)
         self._data = data
 
-    def on_error(self, error):
-        _LOGGER.debug("Websocket error: %s", error)
-
-    def on_close(self):
-        _LOGGER.debug("Websocket closed")
-
     def incidents_listener(self):
         """Spawn a new Listener and links it to self.on_incident."""
 
-        while True:
-            _LOGGER.debug("Starting incidents listener")
-            self.listener = FireServiceRotaIncidents(url=self.url, on_incident=self.on_incident, on_error=self.on_error, on_close=self.on_close)
-            self.listener.run_forever()
+        self.listener = FireServiceRotaIncidents(on_incident=self.on_incident)
+        _LOGGER.debug("Starting incidents listener")
+        self.listener.start(url=self.url)
 
 
-ws = FireService()
+ws = FireService(wsurl)
 
 while True:
     time.sleep(1)
