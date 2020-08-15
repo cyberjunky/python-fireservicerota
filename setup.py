@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# -*- coding: utf-8 -*-
+"""Setup code for module."""
 import io
 import os
 import re
@@ -44,10 +44,9 @@ setup(
     packages=["pyfireservicerota"],
     version=get_version(),
     install_requires=[
+       'pytz',
        'oauthlib',
        'requests',
        'websocket-client',
-#       'wsaccel',
-#       'numpy'
     ]
 )
