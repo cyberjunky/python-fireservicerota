@@ -3,6 +3,7 @@ from collections import deque
 import datetime
 import json
 import logging
+import pytz
 import threading
 import time
 from typing import Optional
@@ -15,7 +16,6 @@ import websocket
 from .const import (
     FSR_DEFAULT_TIMEOUT,
     FSR_ENDPOINT_DUTY_STANDBY_FUNCTION,
-    FSR_ENDPOINT_DUTY_STANDBY_FUNCTIONS,
     FSR_ENDPOINT_INCIDENT_RESPONSES,
     FSR_ENDPOINT_INCIDENTS,
     FSR_ENDPOINT_MEMBERSHIPS,
@@ -91,10 +91,7 @@ class FireServiceRota(object):
 
         try:
             self._token_info = response
-            _LOGGER.debug(
-                f"Refreshed tokens: access {self._token_info['access_token']}, "
-                f"refresh {self._token_info['refresh_token']}"
-            )
+            _LOGGER.debug("Refreshed access tokens.")
             return self._token_info
         except (KeyError, TypeError) as err:
             _LOGGER.debug(f"Error refreshing tokens: {err}")
@@ -112,23 +109,28 @@ class FireServiceRota(object):
 
         _LOGGER.debug(f"Userid data: {self._user}")
 
-    def get_schedules(self):
+    def get_schedules(self, tz):
         """Get user schedules."""
 
         if not self._user:
             self._get_userid()
 
-        today = datetime.datetime.now().astimezone()
+        today = datetime.datetime.now(tz)
         tomorrow = today + datetime.timedelta(days=1)
         id = self._user["memberships"][0]["id"]
-        url = FSR_ENDPOINT_MEMBERSHIPS.format(
-            id,
-            today.strftime("%Y-%m-%dT00:00:00%z"),
-            tomorrow.strftime("%Y-%m-%dT00:00:00%z"),
-        )
+        endpoint = FSR_ENDPOINT_MEMBERSHIPS.format(id)
+
+        params = {
+            "start_time": today.strftime("%Y-%m-%dT00:00:00%z"),
+            "end_time": tomorrow.strftime("%Y-%m-%dT00:00:00%z"),
+        }
 
         response = self._request(
-            "GET", endpoint=url, log_msg_action="get memberships", auth_request=False
+            "GET",
+            endpoint=endpoint,
+            params=params,
+            log_msg_action="get schedule memberships",
+            auth_request=False,
         )
 
         return response
@@ -148,11 +150,11 @@ class FireServiceRota(object):
     def get_standby_function(self, id):
         """Get standby function."""
 
-        url = FSR_ENDPOINT_DUTY_STANDBY_FUNCTION.format(id)
+        endpoint = FSR_ENDPOINT_DUTY_STANDBY_FUNCTION.format(id)
 
         response = self._request(
             "GET",
-            endpoint=url,
+            endpoint=endpoint,
             log_msg_action="get standby function",
             auth_request=False,
         )
@@ -162,18 +164,18 @@ class FireServiceRota(object):
     def set_incident_response(self, id, status):
         """Set incident response for one incident."""
 
-        url = FSR_ENDPOINT_INCIDENT_RESPONSES.format(id)
+        endpoint = FSR_ENDPOINT_INCIDENT_RESPONSES.format(id)
 
         if status:
-            json = {"status": "acknowledged"}
+            params = {"status": "acknowledged"}
         else:
-            json = {"status": "rejected"}
+            params = {"status": "rejected"}
 
         self._request(
             "POST",
-            endpoint=url,
+            endpoint=endpoint,
             log_msg_action="set incident response",
-            params=json,
+            params=params,
             auth_request=False,
         )
 
@@ -183,11 +185,11 @@ class FireServiceRota(object):
         if not self._user:
             self._get_userid()
 
-        url = FSR_ENDPOINT_INCIDENTS.format(id)
+        endpoint = FSR_ENDPOINT_INCIDENTS.format(id)
 
         response = self._request(
             "GET",
-            endpoint=url,
+            endpoint=endpoint,
             log_msg_action="get incident response",
             auth_request=False,
         )
@@ -198,30 +200,10 @@ class FireServiceRota(object):
 
         return None
 
-    def get_availability(self):
+    def get_availability(self, tzstring):
         """Get user availablity."""
-
-        if not self._user:
-            self._get_userid()
-
-        today = datetime.datetime.now().astimezone()
-        tomorrow = today + datetime.timedelta(days=1)
-
-        id = self._user["memberships"][0]["id"]
-        url = FSR_ENDPOINT_MEMBERSHIPS.format(
-            id,
-            today.strftime("%Y-%m-%dT00:00:00%z"),
-            tomorrow.strftime("%Y-%m-%dT00:00:00%z"),
-        )
-        url = FSR_ENDPOINT_MEMBERSHIPS.format(
-            id,
-            today.strftime("%Y-%m-%dT00:00:00"),
-            tomorrow.strftime("%Y-%m-%dT00:00:00"),
-        )
-
-        response = self._request(
-            "GET", endpoint=url, log_msg_action="get memberships", auth_request=False
-        )
+        tz = pytz.timezone(tzstring)
+        response = self.get_schedules(tz)
 
         if response:
             for interval in response["intervals"]:
@@ -249,9 +231,7 @@ class FireServiceRota(object):
 
                         return interval
 
-        interval = {}
-        interval["available"] = False
-        return interval
+        return {"available": False}
 
     def _request(
         self,
@@ -314,7 +294,7 @@ class FireServiceRota(object):
                     )
                 else:
                     _LOGGER.error(
-                        f"Error requesting authorization from fireservicerota: "
+                        f"Error requesting authorization: "
                         f"{response.status_code}: {json_payload}"
                     )
             elif response.status_code == 401:
