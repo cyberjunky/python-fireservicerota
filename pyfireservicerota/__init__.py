@@ -97,23 +97,23 @@ class FireServiceRota(object):
             _LOGGER.debug(f"Error refreshing tokens: {err}")
             return False
 
-    def _get_userid(self):
+    def get_user(self):
         """Get user data."""
 
         self._user = self._request(
             "GET",
             endpoint=FSR_ENDPOINT_USER,
-            log_msg_action="get userid",
+            log_msg_action="get user",
             auth_request=False,
         )
 
-        _LOGGER.debug(f"Userid data: {self._user}")
+        return self._user
 
     def get_schedules(self, tz):
         """Get user schedules."""
 
         if not self._user:
-            self._get_userid()
+            self.get_user()
 
         today = datetime.datetime.now(tz)
         tomorrow = today + datetime.timedelta(days=1)
@@ -183,7 +183,7 @@ class FireServiceRota(object):
         """Get status of incident response for one incident."""
 
         if not self._user:
-            self._get_userid()
+            self.get_user()
 
         endpoint = FSR_ENDPOINT_INCIDENTS.format(id)
 
@@ -380,7 +380,7 @@ class FireServiceRotaIncidents:
         On Close Listener
         """
         if self.is_running:
-            _LOGGER.info("Websocket restart")
+            _LOGGER.debug("Websocket restart after close")
 
             self.ws = websocket.WebSocketApp(
                 self._url,
