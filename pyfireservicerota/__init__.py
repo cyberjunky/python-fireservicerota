@@ -39,7 +39,7 @@ class FireServiceRota(object):
         token_info: dict = None,
     ):
         """Init module"""
-        self._base_url = base_url
+        self._base_url = f"https://{base_url}"
         self._username = username
         self._password = password
         self._token_info = token_info

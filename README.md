@@ -27,6 +27,8 @@ pip3 install pyfireservicerota
 
 ### Initialise module using user credentials to get token_info
 ```python
+#!/usr/bin/env python3
+
 from pyfireservicerota import FireServiceRota, FireServiceRotaIncidents, ExpiredTokenError, InvalidTokenError, InvalidAuthError
 import logging
 import sys
@@ -40,7 +42,7 @@ logging.basicConfig(level=logging.DEBUG)
 token_info = {}
 
 api = FireServiceRota(
-      base_url="https://www.brandweerrooster.nl",
+      base_url="www.brandweerrooster.nl",
       username="your@email.address",
       password="yourpassword",
 )
@@ -58,6 +60,8 @@ NOTE: You don't need to store user credentials, at first authentication just the
 
 ### Initialise module with stored token_info
 ```python
+#!/usr/bin/env python3
+
 from pyfireservicerota import FireServiceRota, FireServiceRotaIncidents, ExpiredTokenError, InvalidTokenError, InvalidAuthError
 import logging
 import sys
@@ -71,7 +75,7 @@ logging.basicConfig(level=logging.DEBUG)
 token_info = {}
 
 api = FireServiceRota(
-      base_url = "https://www.brandweerrooster.nl",
+      base_url = "www.brandweerrooster.nl",
       token_info = token_info
     )
 
