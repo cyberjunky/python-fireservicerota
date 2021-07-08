@@ -89,7 +89,7 @@ except ExpiredTokenError:
    except InvalidAuthError:
        _LOGGER.debug("Invalid refresh token, you need to re-login")
 except InvalidTokenError:
-    _LOGGER.debug("Tokens are invalid")
+   _LOGGER.debug("Tokens are invalid")
    try:
        token_info = api.refresh_tokens()
    except InvalidAuthError:
@@ -108,7 +108,7 @@ except ExpiredTokenError:
    except InvalidAuthError:
        _LOGGER.debug("Invalid refresh token, you need to re-login")
 except InvalidTokenError:
-    _LOGGER.debug("Tokens are invalid")
+   _LOGGER.debug("Tokens are invalid")
    try:
        token_info = api.refresh_tokens()
    except InvalidAuthError:
@@ -125,7 +125,7 @@ except ExpiredTokenError:
    except InvalidAuthError:
        _LOGGER.debug("Invalid refresh token, you need to re-login")
 except InvalidTokenError:
-    _LOGGER.debug("Tokens are invalid")
+   _LOGGER.debug("Tokens are invalid")
    try:
        token_info = api.refresh_tokens()
    except InvalidAuthError:
