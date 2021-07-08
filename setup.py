@@ -47,6 +47,6 @@ setup(
        'pytz',
        'oauthlib',
        'requests',
-       'websocket-client',
+       'websocket-client===0.57.0',
     ]
 )
