@@ -372,10 +372,10 @@ class FireServiceRotaIncidents:
         self.ws.close()
         _LOGGER.debug("Websocket client stopped")
 
-    def __on_open(self):
+    def __on_open(self, ws):
         _LOGGER.debug("Websocket open")
 
-    def __on_close(self):
+    def __on_close(self, close_status_code, close_msg):
         """
         On Close Listener
         """
@@ -393,7 +393,7 @@ class FireServiceRotaIncidents:
             self.wst.daemon = True
             self.wst.start()
 
-    def __on_message(self, message):
+    def __on_message(self, ws, message):
         _LOGGER.debug("Websocket data:" + message)
         try:
             message = json.loads(message)
@@ -437,9 +437,9 @@ class FireServiceRotaIncidents:
         except Exception as e:
             _LOGGER.exception(e)
 
-    def __on_error(self, message):
+    def __on_error(self, ws, error):
         """
         On Error listener
-        :param message:
+        :param error:
         """
-        _LOGGER.debug("Websocket error: %s", message)
+        _LOGGER.debug("Websocket error: %s", error)
