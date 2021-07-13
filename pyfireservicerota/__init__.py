@@ -375,7 +375,7 @@ class FireServiceRotaIncidents:
     def __on_open(self, ws):
         _LOGGER.debug("Websocket open")
 
-    def __on_close(self, close_status_code, close_msg):
+    def __on_close(self, ws, close_status_code, close_msg):
         """
         On Close Listener
         """
