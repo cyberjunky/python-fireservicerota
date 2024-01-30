@@ -8,8 +8,7 @@ authors = [
 dependencies = [
     "pytz",
     "oauthlib",
-    "aiohttp",
-    "aiohttp_retry",
+    "requests",
     "websocket-client"
 ]
 requires-python = ">=3.10"
