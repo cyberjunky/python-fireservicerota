@@ -26,12 +26,12 @@ rebuild-lockfiles: .pdm
 format: .pdm
 	pdm run isort $(sources)
 	pdm run black -l 79 $(sources)
-	pdm run ruff --fix $(sources)
+	pdm run ruff check $(sources)
 
 .PHONY: lint  ## Lint python source files
 lint: .pdm
 	pdm run isort --check-only $(sources)
-	pdm run ruff $(sources)
+	pdm run ruff check $(sources)
 	pdm run black -l 79 $(sources) --check --diff
 	pdm run mypy $(sources)
 
@@ -39,13 +39,18 @@ lint: .pdm
 codespell: .pre-commit
 	pre-commit run codespell --all-files
 
+.PHONY: .venv  ## Install virtual environment
+.venv:
+	python3 -m venv .venv
+	python3 -m pip install -qU pip
+
 .PHONY: publish  ## Publish to PyPi
 publish: .pdm
 	pdm build
 	twine upload dist/*
 
 .PHONY: all  ## Run the standard set of checks performed in CI
-all: lint typecheck codespell
+all: lint codespell
 
 .PHONY: clean  ## Clear local caches and build artifacts
 clean:
@@ -54,19 +59,15 @@ clean:
 	find . -type f -name '*~' -exec rm -f {} +
 	find . -type f -name '.*~' -exec rm -f {} +
 	rm -rf .cache
+	rm -rf .mypy_cache
+	rm -rf .pdm-build
 	rm -rf .pytest_cache
 	rm -rf .ruff_cache
-	rm -rf htmlcov
 	rm -rf *.egg-info
-	rm -f .coverage
-	rm -f .coverage.*
 	rm -rf build
 	rm -rf dist
 	rm -rf site
-	rm -rf docs/_build
-	rm -rf docs/.changelog.md docs/.version.md docs/.tmp_schema_mappings.html
-	rm -rf fastapi/test.db
-	rm -rf coverage.xml
+
 
 .PHONY: help  ## Display this message
 help:

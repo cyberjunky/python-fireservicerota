@@ -1,6 +1,6 @@
 [project]
 name = "pyfireservicerota"
-version = "0.0.44"
+version = "0.0.45"
 description = "Python 3 API wrapper for FireServiceRota/BrandweerRooster"
 authors = [
     {name = "Ron Klinkien", email = "ron@cyberjunky.nl"},
@@ -29,7 +29,23 @@ requires = ["pdm-backend"]
 build-backend = "pdm.backend"
 
 [tool.pdm]
-package-type = "library"
+distribution = true
 
 [tool.mypy]
 ignore_missing_imports = true
+
+[tool.isort]
+include_trailing_comma = true
+force_grid_wrap = 0
+use_parentheses = true
+line_length = 79
+known_first_party = "pyfireservicerota"
+
+[tool.linting]
+tools = [
+    "black",
+    "ruff",
+    "mypy",
+    "isort",
+    "types-requests",
+]

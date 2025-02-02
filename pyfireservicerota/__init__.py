@@ -1,4 +1,5 @@
 """Python 3 API wrapper for FireServiceRota and BrandweerRooster."""
+
 import datetime
 import json
 import logging
@@ -106,8 +107,11 @@ class FireServiceRota(object):
 
         today = datetime.datetime.now(tz)
         tomorrow = today + datetime.timedelta(days=1)
+
         id = self._user["memberships"][0]["id"]
         endpoint = f"memberships/{id}/combined_schedule"
+        # fixme
+        _LOGGER.debug(self._user["memberships"])
 
         params = {
             "start_time": today.strftime("%Y-%m-%dT00:00:00%z"),
@@ -215,9 +219,9 @@ class FireServiceRota(object):
 
                         if interval["assigned_function_ids"]:
                             for func in interval["assigned_function_ids"]:
-                                interval[
-                                    "assigned_function"
-                                ] = self.get_standby_function(func)["name"]
+                                interval["assigned_function"] = (
+                                    self.get_standby_function(func)["name"]
+                                )
 
                         return interval
 
@@ -341,7 +345,7 @@ class FireServiceRota(object):
 
 
 class FireServiceRotaIncidents:
-    is_running = True
+    is_running = False
 
     def __init__(self, on_incident=None):
         """
@@ -353,6 +357,7 @@ class FireServiceRotaIncidents:
     def start(self, url):
         self._url = url
         self._recent_incidents = deque(maxlen=30)
+        self.is_running = True
 
         _LOGGER.debug("Websocket client start")
 
