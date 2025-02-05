@@ -1,6 +1,6 @@
 [project]
 name = "pyfireservicerota"
-version = "0.0.45"
+version = "0.0.46"
 description = "Python 3 API wrapper for FireServiceRota/BrandweerRooster"
 authors = [
     {name = "Ron Klinkien", email = "ron@cyberjunky.nl"},

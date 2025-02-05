@@ -5,6 +5,7 @@ import json
 import logging
 import threading
 from collections import deque
+from typing import Optional
 
 import oauthlib.oauth2
 import pytz
@@ -25,7 +26,13 @@ class FireServiceRota(object):
         password: str = "",
         token_info: dict = {},
     ):
-        """Init module"""
+        """
+        Initializes the FireServiceRota class.
+        :param base_url: The base URL of the FireServiceRota API.
+        :param username: The username for the FireServiceRota API.
+        :param password: The password for the FireServiceRota API.
+        :param token_info: The token information for the FireServiceRota API.
+        """
         self._base_url = f"https://{base_url}"
         self._username = username
         self._password = password
@@ -33,8 +40,10 @@ class FireServiceRota(object):
         self._user = None
 
     def request_tokens(self) -> dict:
-        """Request API tokens."""
-
+        """
+        Request new API tokens.
+        :return: The token information.
+        """
         oauth_client = oauthlib.oauth2.LegacyApplicationClient(client_id=None)
         request_body = oauth_client.prepare_request_body(
             username=self._username, password=self._password
@@ -61,8 +70,10 @@ class FireServiceRota(object):
         return self._token_info
 
     def refresh_tokens(self) -> dict:
-        """Refresh existing API tokens."""
-
+        """
+        Refresh API tokens.
+        :return: The token information.
+        """
         if not self._token_info:
             return self._token_info
 
@@ -88,8 +99,10 @@ class FireServiceRota(object):
         return self._token_info
 
     def get_user(self):
-        """Get user data."""
-
+        """
+        Get user information.
+        :return: The user information.
+        """
         self._user = self._request(
             "GET",
             endpoint="users/current.json",
@@ -100,8 +113,11 @@ class FireServiceRota(object):
         return self._user
 
     def get_schedules(self, tz):
-        """Get user schedules."""
-
+        """
+        Get user schedules.
+        :param tz: The timezone of the user.
+        :return: The user schedules.
+        """
         if not self._user:
             self.get_user()
 
@@ -129,8 +145,10 @@ class FireServiceRota(object):
         return response
 
     def get_skills(self):
-        """Get skills."""
-
+        """
+        Get user skills.
+        :return: The user skills.
+        """
         response = self._request(
             "GET",
             endpoint="skills",
@@ -141,8 +159,11 @@ class FireServiceRota(object):
         return response
 
     def get_standby_function(self, id):
-        """Get standby function."""
-
+        """
+        Get standby function.
+        :param id: The ID of the standby function.
+        :return: The standby function.
+        """
         endpoint = f"standby_duty_functions/{id}"
 
         response = self._request(
@@ -155,8 +176,11 @@ class FireServiceRota(object):
         return response
 
     def set_incident_response(self, id, status):
-        """Set incident response for one incident."""
-
+        """
+        Set incident response.
+        :param id: The ID of the incident.
+        :param status: The status of the incident.
+        """
         endpoint = f"incidents/{id}/incident_responses"
 
         if status:
@@ -173,8 +197,11 @@ class FireServiceRota(object):
         )
 
     def get_incident_response(self, id):
-        """Get status of incident response for one incident."""
-
+        """
+        Get incident response.
+        :param id: The ID of the incident.
+        :return: The incident response.
+        """
         if not self._user:
             self.get_user()
 
@@ -195,7 +222,11 @@ class FireServiceRota(object):
         return None
 
     def get_availability(self, tzstring):
-        """Get user availability."""
+        """
+        Get user availability.
+        :param tzstring: The timezone of the user.
+        :return: The user availability.
+        """
         tz = pytz.timezone(tzstring)
         response = self.get_schedules(tz)
 
@@ -236,9 +267,19 @@ class FireServiceRota(object):
         body: dict = {},
         auth_request: bool = False,
     ) -> dict | None:
-        """Makes a request to the fireservicerota API."""
+        """
+        Make a request to the FireServiceRota API.
+        :param method: The HTTP method of the request.
+        :param endpoint: The endpoint of the request.
+        :param log_msg_action: The action to log.
+        :param params: The parameters of the request.
+        :param body: The body of the request.
+        :param auth_request: The authentication request.
+        :return: The response of the request.
+        """
         url = f"{self._base_url}/{endpoint}"
         headers = dict()
+        response: Optional[requests.Response] = None
 
         if not auth_request:
             url = f"{self._base_url}/api/v2/{endpoint}"
@@ -278,14 +319,15 @@ class FireServiceRota(object):
             return response.json()
         except HTTPError as err:
             json_payload = {}
-            try:
-                json_payload = response.json()
-            except json.decoder.JSONDecodeError:
-                _LOGGER.error("Invalid JSON payload received")
+            if response is not None:
+                try:
+                    json_payload = response.json()
+                except json.decoder.JSONDecodeError:
+                    _LOGGER.error("Invalid JSON payload received")
 
             if auth_request:
                 if (
-                    response
+                    response is not None
                     and response.status_code == 401
                     and json_payload.get("error") == "invalid_grant"
                 ):
@@ -298,7 +340,7 @@ class FireServiceRota(object):
                             f"Error requesting authorization: "
                             f"{response.status_code}: {json_payload}"
                         )
-            elif response and response.status_code == 401:
+            elif response is not None and response.status_code == 401:
                 error = json_payload.get("error")
                 if error == "token_invalid":
                     raise InvalidTokenError(
@@ -331,7 +373,11 @@ class FireServiceRota(object):
                 f"Connection timed out while attempting to {log_msg_action}, "
                 f"possible connectivity outage"
             )
-        except (RequestException, json.decoder.JSONDecodeError) as err:
+        except (
+            RequestException,
+            json.decoder.JSONDecodeError,
+            ConnectionError,
+        ) as err:
             if response:
                 _LOGGER.error(
                     f"Error connecting while attempting to {log_msg_action}, "
@@ -345,19 +391,27 @@ class FireServiceRota(object):
 
 
 class FireServiceRotaIncidents:
-    is_running = False
+    """Class for communicating with the fireservicerota incidents API."""
 
     def __init__(self, on_incident=None):
         """
+        Initializes the FireServiceRotaIncidents class.
         :param on_incident: function that gets called on received incident
         """
         self.on_incident = on_incident
         self.ws = None
+        self.is_running = False
 
     def start(self, url):
+        """
+        Starts the websocket client and sets the running state to True.
+        This method initializes the websocket client with the provided URL and
+        starts the websocket client in a separate thread. It also initializes
+        the `_recent_incidents` deque with a maximum length of 30.
+        :param url: The URL of the websocket server.
+        """
         self._url = url
         self._recent_incidents = deque(maxlen=30)
-        self.is_running = True
 
         _LOGGER.debug("Websocket client start")
 
@@ -372,21 +426,32 @@ class FireServiceRotaIncidents:
         self.wst = threading.Thread(target=lambda: self.ws.run_forever())
         self.wst.daemon = True
         self.wst.start()
+        self.is_running = True
 
     def stop(self):
         """
-        close websocket
+        Stops the websocket client and sets the running state to False.
+        This method closes the websocket connection and logs a debug message
+        indicating that the websocket client has been stopped. It also updates
+        the `is_running` attribute to False.
         """
-        self.is_running = False
         self.ws.close()
         _LOGGER.debug("Websocket client stopped")
+        self.is_running = False
 
     def __on_open(self, ws):
+        """
+        This method is called when the websocket connection is opened.
+        :param ws: The websocket instance.
+        """
         _LOGGER.debug("Websocket open")
 
     def __on_close(self, ws, close_status_code, close_msg):
         """
-        On Close Listener
+        This method is called when the websocket connection is closed.
+        :param ws: The websocket instance.
+        :param close_status_code: The status code of the close message.
+        :param close_msg: The close message.
         """
         if self.is_running:
             _LOGGER.debug("Websocket restarted after close")
@@ -403,6 +468,11 @@ class FireServiceRotaIncidents:
             self.wst.start()
 
     def __on_message(self, ws, message):
+        """
+        This method is called when a message is received from the websocket.
+        :param ws: The websocket instance.
+        :param message: The message received from the websocket.
+        """
         _LOGGER.debug("Websocket data:" + message)
         try:
             message = json.loads(message)
