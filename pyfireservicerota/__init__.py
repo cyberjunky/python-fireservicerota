@@ -393,7 +393,9 @@ class FireServiceRota(object):
 class FireServiceRotaIncidents:
     """Class for communicating with the fireservicerota incidents API."""
 
-    def __init__(self, on_incident=None):
+    def __init__(
+        self, on_incident=None, ping_interval: int = 60, ping_timeout: int = 10
+    ):
         """
         Initializes the FireServiceRotaIncidents class.
         :param on_incident: function that gets called on received incident
@@ -401,8 +403,13 @@ class FireServiceRotaIncidents:
         self.on_incident = on_incident
         self.ws = None
         self.is_running = False
+        self.ping_interval = ping_interval
+        self.ping_timeout = ping_timeout
 
-    def start(self, url):
+    def start(
+        self,
+        url,
+    ):
         """
         Starts the websocket client and sets the running state to True.
         This method initializes the websocket client with the provided URL and
@@ -421,9 +428,16 @@ class FireServiceRotaIncidents:
             on_error=self.__on_error,
             on_message=self.__on_message,
             on_close=self.__on_close,
+            on_ping=self.__on_ping,
+            on_pong=self.__on_pong,
         )
 
-        self.wst = threading.Thread(target=lambda: self.ws.run_forever())
+        self.wst = threading.Thread(
+            target=lambda: self.ws.run_forever(
+                ping_interval=self.ping_interval,
+                ping_timeout=self.ping_timeout,
+            )
+        )
         self.wst.daemon = True
         self.wst.start()
         self.is_running = True
@@ -438,6 +452,14 @@ class FireServiceRotaIncidents:
         self.ws.close()
         _LOGGER.debug("Websocket client stopped")
         self.is_running = False
+
+    def __on_ping(self, ws, message):
+        _LOGGER.debug(
+            "Got a ping! A pong reply has already been automatically sent."
+        )
+
+    def __on_pong(self, ws, message):
+        _LOGGER.debug("Got a pong! No need to respond")
 
     def __on_open(self, ws):
         """
@@ -462,8 +484,15 @@ class FireServiceRotaIncidents:
                 on_error=self.__on_error,
                 on_message=self.__on_message,
                 on_close=self.__on_close,
+                on_ping=self.__on_ping,
+                on_pong=self.__on_pong,
             )
-            self.wst = threading.Thread(target=lambda: self.ws.run_forever())
+            self.wst = threading.Thread(
+                target=lambda: self.ws.run_forever(
+                    ping_interval=self.ping_interval,
+                    ping_timeout=self.ping_timeout,
+                )
+            )
             self.wst.daemon = True
             self.wst.start()
 
@@ -509,10 +538,11 @@ class FireServiceRotaIncidents:
                 )
             elif message["type"] == "confirm_subscription":
                 _LOGGER.debug("Successfully subscribed to incidents channel")
-            elif message["type"] == "ping":
-                pass
-            else:
-                _LOGGER.debug(f"Received unknown type: {message}")
+            # elif message["type"] == "ping":
+            #     self.ws.send(json.dumps({"type": "pong"}))
+            #     _LOGGER.debug("Ping received on incidents channel, sent a pong")
+            # else:
+            #     _LOGGER.debug(f"Received unknown type: {message}")
         except Exception as e:
             _LOGGER.exception(e)
 
