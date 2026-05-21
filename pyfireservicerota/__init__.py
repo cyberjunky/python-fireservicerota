@@ -5,7 +5,7 @@ import json
 import logging
 import threading
 from collections import deque
-from typing import Optional
+from typing import cast
 
 import oauthlib.oauth2
 import pytz
@@ -16,7 +16,7 @@ from requests.exceptions import HTTPError, RequestException, Timeout
 _LOGGER = logging.getLogger("fireservicerota")
 
 
-class FireServiceRota(object):
+class FireServiceRota:
     """Class for communicating with the fireservicerota API."""
 
     def __init__(
@@ -24,7 +24,7 @@ class FireServiceRota(object):
         base_url=None,
         username: str = "",
         password: str = "",
-        token_info: dict = {},
+        token_info: dict | None = None,
     ):
         """
         Initializes the FireServiceRota class.
@@ -36,7 +36,7 @@ class FireServiceRota(object):
         self._base_url = f"https://{base_url}"
         self._username = username
         self._password = password
-        self._token_info = token_info
+        self._token_info = token_info or {}
         self._user = None
 
     def request_tokens(self) -> dict:
@@ -57,7 +57,7 @@ class FireServiceRota(object):
                 params=request_body,
                 auth_request=True,
             )
-            if token_info:
+            if isinstance(token_info, dict):
                 self._token_info = token_info
 
             _LOGGER.debug(
@@ -90,7 +90,7 @@ class FireServiceRota(object):
                 auth_request=True,
             )
 
-            if token_info:
+            if isinstance(token_info, dict):
                 self._token_info = token_info
             _LOGGER.debug("Refreshed access tokens")
         except (KeyError, TypeError) as err:
@@ -124,10 +124,8 @@ class FireServiceRota(object):
         today = datetime.datetime.now(tz)
         tomorrow = today + datetime.timedelta(days=1)
 
-        id = self._user["memberships"][0]["id"]
-        endpoint = f"memberships/{id}/combined_schedule"
-        # fixme
-        _LOGGER.debug(self._user["memberships"])
+        membership_id = self._user["memberships"][0]["id"]
+        endpoint = f"memberships/{membership_id}/combined_schedule"
 
         params = {
             "start_time": today.strftime("%Y-%m-%dT00:00:00%z"),
@@ -258,15 +256,79 @@ class FireServiceRota(object):
 
         return {"available": False}
 
+    def get_pagers(self) -> list | None:
+        """
+        Get all pagers linked to the authenticated user.
+        :return: A list of pager dicts, or None on error.
+        """
+        return cast(
+            list | None,
+            self._request(
+                "GET",
+                endpoint="pagers",
+                log_msg_action="get pagers",
+                auth_request=False,
+            ),
+        )
+
+    def send_pager_message(
+        self,
+        pager_id: int,
+        message: str,
+        webhook_url: str | None = None,
+    ) -> dict | None:
+        """
+        Send a text message to a specific pager.
+        :param pager_id: The pager id as returned by get_pagers().
+        :param message: Text to display on the pager.
+        :param webhook_url: Optional URL for delivery-status callbacks.
+        :return: A dict with at least id (message_id) and status, or None on error.
+        """
+        body: dict = {"message": message}
+        if webhook_url:
+            body["webhook_url"] = webhook_url
+
+        return cast(
+            dict | None,
+            self._request(
+                "POST",
+                endpoint=f"pagers/{pager_id}/messages",
+                log_msg_action="send pager message",
+                body=body,
+                auth_request=False,
+            ),
+        )
+
+    def get_pager_message_status(
+        self,
+        pager_id: int,
+        message_id: int,
+    ) -> dict | None:
+        """
+        Poll delivery status of a previously sent pager message.
+        :param pager_id: The pager id.
+        :param message_id: The id returned by send_pager_message().
+        :return: A dict with status (e.g. "delivered", "pending", "failed"), or None on error.
+        """
+        return cast(
+            dict | None,
+            self._request(
+                "GET",
+                endpoint=f"pagers/{pager_id}/messages/{message_id}",
+                log_msg_action="get pager message status",
+                auth_request=False,
+            ),
+        )
+
     def _request(
         self,
         method: str,
         endpoint: str,
         log_msg_action: str,
-        params: dict = {},
-        body: dict = {},
+        params: dict | None = None,
+        body: dict | None = None,
         auth_request: bool = False,
-    ) -> dict | None:
+    ) -> dict | list | None:
         """
         Make a request to the FireServiceRota API.
         :param method: The HTTP method of the request.
@@ -279,7 +341,10 @@ class FireServiceRota(object):
         """
         url = f"{self._base_url}/{endpoint}"
         headers = dict()
-        response: Optional[requests.Response] = None
+        response: requests.Response | None = None
+        json_payload: dict = {}
+        params = params or {}
+        body = body or {}
 
         if not auth_request:
             url = f"{self._base_url}/api/v2/{endpoint}"
@@ -303,8 +368,9 @@ class FireServiceRota(object):
                 timeout=10,
             )
 
+            log_msg: str = ""
             try:
-                log_msg = response.json()
+                log_msg = str(response.json())
 
             except requests.exceptions.SSLError:
                 _LOGGER.error("SSL error occurred")
@@ -318,7 +384,6 @@ class FireServiceRota(object):
             response.raise_for_status()
             return response.json()
         except HTTPError as err:
-            json_payload = {}
             if response is not None:
                 try:
                     json_payload = response.json()
@@ -512,7 +577,7 @@ class FireServiceRotaIncidents:
                     == "IncidentNotificationsChannel"
                 ):
                     incident = message["message"]
-                    """mark new and update messages"""
+                    # mark new vs update messages
                     incident_id = incident["id"]
                     if incident_id not in self._recent_incidents:
                         self._recent_incidents.append(incident_id)

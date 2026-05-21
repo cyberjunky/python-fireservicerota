@@ -1,52 +1,42 @@
 .DEFAULT_GOAL := all
 sources = pyfireservicerota
-
-.PHONY: .pdm  ## Check that PDM is installed
-.pdm:
-	@pdm -V || echo 'Please install PDM: https://pdm.fming.dev/latest/\#installation'
+venv = .venv/bin
 
 .PHONY: .pre-commit  ## Check that pre-commit is installed
 .pre-commit:
 	@pre-commit -V || echo 'Please install pre-commit: https://pre-commit.com/'
 
-.PHONY: install  ## Install the package, dependencies, and pre-commit for local development
-install: .pdm .pre-commit
-	pdm install --group :all
+.PHONY: install  ## Install linting tools and pre-commit hooks
+install: .venv .pre-commit
+	$(venv)/pip install -q ruff mypy isort black types-requests
 	pre-commit install --install-hooks
 
-.PHONY: refresh-lockfiles  ## Sync lockfiles with requirements files.
-refresh-lockfiles: .pdm
-	pdm update --update-reuse --group :all
-
-.PHONY: rebuild-lockfiles  ## Rebuild lockfiles from scratch, updating all dependencies
-rebuild-lockfiles: .pdm
-	pdm update --update-eager --group :all
-
 .PHONY: format  ## Auto-format python source files
-format: .pdm
-	pdm run isort $(sources)
-	pdm run black -l 79 $(sources)
-	pdm run ruff check $(sources)
+format: .venv
+	$(venv)/isort $(sources)
+	$(venv)/black -l 79 $(sources)
+	$(venv)/ruff check $(sources)
 
 .PHONY: lint  ## Lint python source files
-lint: .pdm
-	pdm run isort --check-only $(sources)
-	pdm run ruff check $(sources)
-	pdm run black -l 79 $(sources) --check --diff
-	pdm run mypy $(sources)
+lint: .venv
+	$(venv)/isort --check-only $(sources)
+	$(venv)/ruff check $(sources)
+	$(venv)/black -l 79 $(sources) --check --diff
+	$(venv)/mypy $(sources)
 
 .PHONY: codespell  ## Use Codespell to do spellchecking
 codespell: .pre-commit
 	pre-commit run codespell --all-files
 
-.PHONY: .venv  ## Install virtual environment
+.PHONY: .venv  ## Create virtual environment with linting tools
 .venv:
-	python3 -m venv .venv
-	python3 -m pip install -qU pip
+	python3 -m venv .venv --upgrade-deps
+	$(venv)/pip install -q ruff mypy isort black types-requests
 
 .PHONY: publish  ## Publish to PyPi
-publish: .pdm
-	pdm build
+publish:
+	$(venv)/pip install -q build twine
+	python3 -m build
 	twine upload dist/*
 
 .PHONY: all  ## Run the standard set of checks performed in CI
@@ -67,7 +57,6 @@ clean:
 	rm -rf build
 	rm -rf dist
 	rm -rf site
-
 
 .PHONY: help  ## Display this message
 help:

@@ -1,163 +1,144 @@
 # Python: FireServiceRota / BrandweerRooster
 
-Basic Python 3 API wrapper for FireServiceRota and BrandweerRooster for use with Home Assistant
+Python 3 API wrapper for [FireServiceRota](https://www.fireservicerota.co.uk) and [BrandweerRooster](https://www.brandweerrooster.nl).
 
 ## About
 
-This package allows you to get notified about emergency incidents from https://www.FireServiceRota.co.uk and https://www.BrandweerRooster.nl.
-Those are services used by firefighters.
+This package provides access to emergency incident data from FireServiceRota and BrandweerRooster — services used by firefighters.
 
-It currently provides the following limited functionality:
+**Features:**
+- Real-time incident notifications via WebSocket
+- User availability (duty schedule)
+- Incident response status (acknowledge / reject)
+- Pager management: list pagers, send messages, poll delivery status
 
-- Connect to the websocket to get incident details in near-realtime
-- Get user availability (duty)
-- Set user incident response status
-
-See https://fireservicerota.co.uk and https://brandweerrooster.nl for more details.
-
-NOTE: You need a subscription and login account to be able to use it.
+> A subscription and login account are required. See [fireservicerota.co.uk](https://fireservicerota.co.uk) or [brandweerrooster.nl](https://brandweerrooster.nl) for details.
 
 ## Installation
 
 ```bash
-pip3 install pyfireservicerota
+pip install pyfireservicerota
 ```
 
-## Usage
+## Authentication
 
-### Initialise module using user credentials to get token_info
+Authentication uses OAuth2 tokens. On first use, exchange your credentials for a `token_info` dict and store it. After that you only need the tokens — use `refresh_tokens()` to keep them valid without re-entering your password.
+
+### First-time login
+
 ```python
-#!/usr/bin/env python3
-
-from pyfireservicerota import FireServiceRota, FireServiceRotaIncidents, ExpiredTokenError, InvalidTokenError, InvalidAuthError
-import logging
-import sys
-import json
-import time
-import threading
-
-_LOGGER = logging.getLogger(__name__)
-logging.basicConfig(level=logging.DEBUG)
-
-token_info = {}
+from pyfireservicerota import FireServiceRota, InvalidAuthError
 
 api = FireServiceRota(
-      base_url="www.brandweerrooster.nl",
-      username="your@email.address",
-      password="yourpassword",
+    base_url="www.brandweerrooster.nl",
+    username="your@email.address",
+    password="yourpassword",
 )
 
 try:
     token_info = api.request_tokens()
 except InvalidAuthError:
+    print("Invalid credentials")
     token_info = None
-
-if not token_info:
-    _LOGGER.error("Failed to get access tokens")
 ```
 
-NOTE: You don't need to store user credentials, at first authentication just the token_info dictionary is enough use api.refresh_tokens to refresh it.
+### Subsequent use (stored tokens)
 
-### Initialise module with stored token_info
 ```python
-#!/usr/bin/env python3
-
-from pyfireservicerota import FireServiceRota, FireServiceRotaIncidents, ExpiredTokenError, InvalidTokenError, InvalidAuthError
-import logging
-import sys
-import json
-import time
-
-
-_LOGGER = logging.getLogger(__name__)
-logging.basicConfig(level=logging.DEBUG)
-
-token_info = {}
+from pyfireservicerota import FireServiceRota
 
 api = FireServiceRota(
-      base_url = "www.brandweerrooster.nl",
-      token_info = token_info
-    )
+    base_url="www.brandweerrooster.nl",
+    token_info=token_info,  # dict loaded from storage
+)
+```
 
-# Get user availability (duty)
+### Refreshing tokens
+
+Any API call can raise `ExpiredTokenError` or `InvalidTokenError` when the access token needs refreshing:
+
+```python
+from pyfireservicerota import ExpiredTokenError, InvalidTokenError, InvalidAuthError
+
 try:
-   print(api.get_availability('Europe/Amsterdam'))
-except ExpiredTokenError:
-   _LOGGER.debug("Tokens are expired, refreshing")
-   try:
-       token_info = api.refresh_tokens()
-   except InvalidAuthError:
-       _LOGGER.debug("Invalid refresh token, you need to re-login")
-except InvalidTokenError:
-   _LOGGER.debug("Tokens are invalid")
-   try:
-       token_info = api.refresh_tokens()
-   except InvalidAuthError:
-       _LOGGER.debug("Invalid refresh token, you need to re-login")
+    result = api.get_availability("Europe/Amsterdam")
+except (ExpiredTokenError, InvalidTokenError):
+    try:
+        token_info = api.refresh_tokens()
+    except InvalidAuthError:
+        print("Refresh token invalid, re-login required")
+```
 
-# Get incident response status for incident with id 123456
+## Usage
 
+### Availability
+
+```python
+availability = api.get_availability("Europe/Amsterdam")
+print(availability)
+# {"available": True, "type": "recurring", ...} or {"available": False}
+```
+
+### Incidents
+
+```python
 incident_id = 123456
 
-try:
-   print(api.get_incident_response(incident_id))
-except ExpiredTokenError:
-   _LOGGER.debug("Tokens are expired, refreshing")
-   try:
-       token_info = api.refresh_tokens()
-   except InvalidAuthError:
-       _LOGGER.debug("Invalid refresh token, you need to re-login")
-except InvalidTokenError:
-   _LOGGER.debug("Tokens are invalid")
-   try:
-       token_info = api.refresh_tokens()
-   except InvalidAuthError:
-       _LOGGER.debug("Invalid refresh token, you need to re-login")
+# Get your response status for an incident
+response = api.get_incident_response(incident_id)
 
+# Acknowledge (True) or reject (False)
+api.set_incident_response(incident_id, True)
+```
 
-# Set incident response to acknowlegded (False = 'rejected')
-try:
-   api.set_incident_response(id, True)
-except ExpiredTokenError:
-   _LOGGER.debug("Tokens are expired, refreshing")
-   try:
-       token_info = api.refresh_tokens()
-   except InvalidAuthError:
-       _LOGGER.debug("Invalid refresh token, you need to re-login")
-except InvalidTokenError:
-   _LOGGER.debug("Tokens are invalid")
-   try:
-       token_info = api.refresh_tokens()
-   except InvalidAuthError:
-       _LOGGER.debug("Invalid refresh token, you need to re-login")
+### Real-time incident notifications (WebSocket)
 
+```python
+import time
+from pyfireservicerota import FireServiceRotaIncidents
 
-# Connect to websocket channel for incidents
+def on_incident(data):
+    print(f"Incident received: {data}")
+
 wsurl = f"wss://www.brandweerrooster.nl/cable?access_token={token_info['access_token']}"
 
-class FireService():
-
-    def __init__(self, url):
-
-        self._data = None
-        self.listener = None
-        self.url = url
-        self.incidents_listener()
-
-    def on_incident(self, data):
-        _LOGGER.debug("INCIDENT: %s", data)
-        self._data = data
-
-    def incidents_listener(self):
-        """Spawn a new Listener and links it to self.on_incident."""
-
-        self.listener = FireServiceRotaIncidents(on_incident=self.on_incident)
-        _LOGGER.debug("Starting incidents listener")
-        self.listener.start(url=self.url)
-
-
-ws = FireService(wsurl)
+listener = FireServiceRotaIncidents(on_incident=on_incident)
+listener.start(url=wsurl)
 
 while True:
     time.sleep(1)
 ```
+
+### Pagers
+
+```python
+# List pagers linked to your account
+pagers = api.get_pagers()
+# [{"id": 6789, "user_id": 12345, "serial_number": "C202309.12345", "type": "Swissphone s.QUAD C35"}]
+
+# Send a message
+result = api.send_pager_message(6789, "Test alarm message")
+if result:
+    print(f"Sent: id={result['id']} status={result['status']}")
+
+# With a delivery-status webhook
+result = api.send_pager_message(
+    6789,
+    "Test alarm message",
+    webhook_url="https://your.server/pager-callback",
+)
+
+# Poll delivery status
+if result:
+    status = api.get_pager_message_status(6789, result["id"])
+    if status:
+        print(status["status"])  # "delivered", "pending", or "failed"
+```
+
+## Exceptions
+
+| Exception | When raised |
+|---|---|
+| `InvalidAuthError` | Wrong credentials or expired refresh token |
+| `ExpiredTokenError` | Access token expired or revoked — call `refresh_tokens()` |
+| `InvalidTokenError` | Access token invalid — call `refresh_tokens()` |
