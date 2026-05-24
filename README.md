@@ -114,17 +114,25 @@ while True:
 ```python
 # List pagers linked to your account
 pagers = api.get_pagers()
-# [{"id": 6789, "user_id": 12345, "serial_number": "C202309.12345", "type": "Swissphone s.QUAD C35"}]
+# [{"id": 7719, "user_id": 12345, "serial_number": "C202351.01045", "type": "Swissphone s.QUAD C35",
+#   "battery_level": 79, "state": "powered_on", "signal_strength": -91, ...}]
 
-# Send a message
-result = api.send_pager_message(6789, "Test alarm message")
+# Send using the pager's own registered address (confirmation=True)
+result = api.send_pager_message(6789, "Test alarm message", confirmation=True)
 if result:
-    print(f"Sent: id={result['id']} status={result['status']}")
+    print(f"Sent: id={result['id']} state={result['acknowledgment_state']} address={result['address']}")
+
+# Send to a specific capcode address
+result = api.send_pager_message(6789, "Test alarm message", address="1234567")
+
+# Send to multiple capcodes
+result = api.send_pager_message(6789, "Test alarm message", addresses=["1234567", "7654321"])
 
 # With a delivery-status webhook
 result = api.send_pager_message(
     6789,
     "Test alarm message",
+    confirmation=True,
     webhook_url="https://your.server/pager-callback",
 )
 
@@ -132,7 +140,28 @@ result = api.send_pager_message(
 if result:
     status = api.get_pager_message_status(6789, result["id"])
     if status:
-        print(status["status"])  # "delivered", "pending", or "failed"
+        print(status["acknowledgment_state"])  # e.g. "acknowledged", "unknown"
+```
+
+## Example script
+
+`example.py` connects to `www.brandweerrooster.nl` and runs through the full API surface:
+
+1. Request OAuth2 tokens
+2. Fetch the most recent incident
+3. Get user availability
+4. Get and set incident response status (uses the most recent incident)
+5. List pagers, send a test message, poll delivery status
+6. Connect to the WebSocket and listen for live incident notifications
+
+**Run with environment variables (non-interactive):**
+```bash
+FSR_USERNAME=your@email.nl FSR_PASSWORD=secret python example.py
+```
+
+**Or interactively (prompts for credentials):**
+```bash
+python example.py
 ```
 
 ## Exceptions

@@ -5,7 +5,6 @@ import json
 import logging
 import threading
 from collections import deque
-from typing import cast
 
 import oauthlib.oauth2
 import pytz
@@ -219,6 +218,20 @@ class FireServiceRota:
 
         return None
 
+    def get_incidents(self, limit: int = 10) -> list | None:
+        """
+        Get recent incidents.
+        :param limit: Maximum number of incidents to return.
+        :return: A list of incident dicts, or None on error.
+        """
+        return self._request(  # type: ignore[return-value]
+            "GET",
+            endpoint="incidents",
+            log_msg_action="get incidents",
+            params={"per_page": limit},
+            auth_request=False,
+        )
+
     def get_availability(self, tzstring):
         """
         Get user availability.
@@ -261,42 +274,49 @@ class FireServiceRota:
         Get all pagers linked to the authenticated user.
         :return: A list of pager dicts, or None on error.
         """
-        return cast(
-            list | None,
-            self._request(
-                "GET",
-                endpoint="pagers",
-                log_msg_action="get pagers",
-                auth_request=False,
-            ),
+        return self._request(  # type: ignore[return-value]
+            "GET",
+            endpoint="pagers",
+            log_msg_action="get pagers",
+            auth_request=False,
         )
 
     def send_pager_message(
         self,
         pager_id: int,
         message: str,
+        address: str | None = None,
+        addresses: list | None = None,
+        confirmation: bool = False,
         webhook_url: str | None = None,
     ) -> dict | None:
         """
         Send a text message to a specific pager.
         :param pager_id: The pager id as returned by get_pagers().
         :param message: Text to display on the pager.
+        :param address: Pager capcode address. Exactly one of address,
+            addresses, or confirmation must be provided.
+        :param addresses: List of pager capcode addresses.
+        :param confirmation: Send using the pager's own registered address.
         :param webhook_url: Optional URL for delivery-status callbacks.
-        :return: A dict with at least id (message_id) and status, or None on error.
+        :return: A dict with id, body, pager_id, acknowledgment_state, address, addresses, or None on error.
         """
-        body: dict = {"message": message}
+        body: dict = {"body": message}
+        if address:
+            body["address"] = address
+        elif addresses:
+            body["addresses"] = addresses
+        else:
+            body["confirmation"] = confirmation
         if webhook_url:
             body["webhook_url"] = webhook_url
 
-        return cast(
-            dict | None,
-            self._request(
-                "POST",
-                endpoint=f"pagers/{pager_id}/messages",
-                log_msg_action="send pager message",
-                body=body,
-                auth_request=False,
-            ),
+        return self._request(  # type: ignore[return-value]
+            "POST",
+            endpoint=f"pagers/{pager_id}/messages",
+            log_msg_action="send pager message",
+            body=body,
+            auth_request=False,
         )
 
     def get_pager_message_status(
@@ -308,16 +328,13 @@ class FireServiceRota:
         Poll delivery status of a previously sent pager message.
         :param pager_id: The pager id.
         :param message_id: The id returned by send_pager_message().
-        :return: A dict with status (e.g. "delivered", "pending", "failed"), or None on error.
+        :return: A dict with acknowledgment_state (e.g. "acknowledged", "unknown"), or None on error.
         """
-        return cast(
-            dict | None,
-            self._request(
-                "GET",
-                endpoint=f"pagers/{pager_id}/messages/{message_id}",
-                log_msg_action="get pager message status",
-                auth_request=False,
-            ),
+        return self._request(  # type: ignore[return-value]
+            "GET",
+            endpoint=f"pagers/{pager_id}/messages/{message_id}",
+            log_msg_action="get pager message status",
+            auth_request=False,
         )
 
     def _request(
@@ -344,7 +361,6 @@ class FireServiceRota:
         response: requests.Response | None = None
         json_payload: dict = {}
         params = params or {}
-        body = body or {}
 
         if not auth_request:
             url = f"{self._base_url}/api/v2/{endpoint}"
@@ -364,21 +380,14 @@ class FireServiceRota:
                 url,
                 headers=headers,
                 params=params,
-                json=body,
+                json=body or None,
                 timeout=10,
             )
 
-            log_msg: str = ""
-            try:
-                log_msg = str(response.json())
-
-            except requests.exceptions.SSLError:
-                _LOGGER.error("SSL error occurred")
-            except json.decoder.JSONDecodeError:
-                _LOGGER.error("Invalid JSON payload received")
-
             _LOGGER.debug(
-                f"Request response: {response.status_code}: {log_msg}"
+                "Request response: %s: %s",
+                response.status_code,
+                response.json(),
             )
 
             response.raise_for_status()
