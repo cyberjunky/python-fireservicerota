@@ -328,7 +328,7 @@ class FireServiceRota:
         Poll delivery status of a previously sent pager message.
         :param pager_id: The pager id.
         :param message_id: The id returned by send_pager_message().
-        :return: A dict with acknowledgment_state (e.g. "acknowledged", "unknown"), or None on error.
+        :return: A dict with acknowledgment_state (e.g. "automatic", "manual", "none"), or None on error.
         """
         return self._request(  # type: ignore[return-value]
             "GET",

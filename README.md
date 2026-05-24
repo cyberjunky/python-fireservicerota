@@ -140,7 +140,7 @@ result = api.send_pager_message(
 if result:
     status = api.get_pager_message_status(6789, result["id"])
     if status:
-        print(status["acknowledgment_state"])  # e.g. "acknowledged", "unknown"
+        print(status["acknowledgment_state"])  # e.g. "automatic", "manual", "none"
 ```
 
 ## Example script
