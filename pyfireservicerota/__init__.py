@@ -4,6 +4,7 @@ import datetime
 import json
 import logging
 import threading
+import time
 from collections import deque
 
 import oauthlib.oauth2
@@ -464,21 +465,53 @@ class FireServiceRota:
         return None
 
 
+# Incidents are not replayed by the server, so every second offline counts:
+# the first reconnect is immediate and retries never wait longer than this.
+RECONNECT_DELAY_MAX = 5
+# A connection that lived shorter than this does not reset the retry delay,
+# so a server that accepts and instantly drops us is not hammered.
+STABLE_CONNECTION_SECONDS = 10
+
+
 class FireServiceRotaIncidents:
     """Class for communicating with the fireservicerota incidents API."""
 
     def __init__(
-        self, on_incident=None, ping_interval: int = 60, ping_timeout: int = 10
+        self,
+        on_incident=None,
+        ping_interval: int = 6,
+        ping_timeout: int = 4,
+        connect_timeout: int = 5,
+        on_connect_failed=None,
     ):
         """
         Initializes the FireServiceRotaIncidents class.
         :param on_incident: function that gets called on received incident
+        :param ping_interval: seconds of silence after which the connection
+            is probed with a ping; the server sends a heartbeat every 3
+            seconds, so a healthy connection is never silent this long
+        :param ping_timeout: seconds to wait for a reply to that ping before
+            the connection is considered dead
+        :param connect_timeout: seconds to wait for the connection and its
+            handshake to complete
+        :param on_connect_failed: function without arguments that gets
+            called, from the listener thread, each time a connection attempt
+            ends without the server welcoming us; an expired access token
+            is a common cause, so this is the moment to refresh it and
+            call `start` with a new URL
         """
         self.on_incident = on_incident
-        self.ws = None
+        self.on_connect_failed = on_connect_failed
+        self.ws: websocket.WebSocket | None = None
+        self.wst: threading.Thread | None = None
         self.is_running = False
         self.ping_interval = ping_interval
         self.ping_timeout = ping_timeout
+        self.connect_timeout = connect_timeout
+        self._url: str | None = None
+        self._recent_incidents: deque = deque(maxlen=30)
+        self._stop_event = threading.Event()
+        self._lock = threading.Lock()
 
     def start(
         self,
@@ -486,95 +519,154 @@ class FireServiceRotaIncidents:
     ):
         """
         Starts the websocket client and sets the running state to True.
-        This method initializes the websocket client with the provided URL and
-        starts the websocket client in a separate thread. It also initializes
-        the `_recent_incidents` deque with a maximum length of 30.
+        The client runs in a separate thread and keeps reconnecting, with an
+        increasing delay, until `stop` is called.
         :param url: The URL of the websocket server.
         """
+        if self.is_running:
+            self.stop()
+
         self._url = url
         self._recent_incidents = deque(maxlen=30)
 
         _LOGGER.debug("Websocket client start")
 
-        self.ws = websocket.WebSocketApp(
-            self._url,
-            on_open=self.__on_open,
-            on_error=self.__on_error,
-            on_message=self.__on_message,
-            on_close=self.__on_close,
-            on_ping=self.__on_ping,
-            on_pong=self.__on_pong,
-        )
-
-        self.wst = threading.Thread(
-            target=lambda: self.ws.run_forever(
-                ping_interval=self.ping_interval,
-                ping_timeout=self.ping_timeout,
-            )
-        )
-        self.wst.daemon = True
-        self.wst.start()
+        # Every run gets its own stop event, so a thread that is still
+        # winding down after stop() can never be revived by a later start().
+        stop_event = threading.Event()
+        self._stop_event = stop_event
         self.is_running = True
+        self.wst = threading.Thread(
+            target=self._run,
+            args=(url, stop_event),
+            name="fireservicerota-incidents",
+            daemon=True,
+        )
+        self.wst.start()
 
     def stop(self):
         """
         Stops the websocket client and sets the running state to False.
-        This method closes the websocket connection and logs a debug message
-        indicating that the websocket client has been stopped. It also updates
-        the `is_running` attribute to False.
+        This method closes the websocket connection and prevents any further
+        reconnect attempts.
         """
-        self.ws.close()
-        _LOGGER.debug("Websocket client stopped")
         self.is_running = False
+        self._stop_event.set()
+        with self._lock:
+            ws = self.ws
+        if ws is not None:
+            try:
+                # abort() wakes up the listener thread blocked in recv
+                ws.abort()
+            except OSError as err:
+                _LOGGER.debug("Websocket abort failed: %s", err)
+        _LOGGER.debug("Websocket client stopped")
 
-    def __on_ping(self, ws, message):
-        _LOGGER.debug(
-            "Got a ping! A pong reply has already been automatically sent."
-        )
+    def _run(self, url: str, stop_event: threading.Event) -> None:
+        """Connect, listen and reconnect until stopped."""
+        delay = 0
 
-    def __on_pong(self, ws, message):
-        _LOGGER.debug("Got a pong! No need to respond")
-
-    def __on_open(self, ws):
-        """
-        This method is called when the websocket connection is opened.
-        :param ws: The websocket instance.
-        """
-        _LOGGER.debug("Websocket open")
-
-    def __on_close(self, ws, close_status_code, close_msg):
-        """
-        This method is called when the websocket connection is closed.
-        :param ws: The websocket instance.
-        :param close_status_code: The status code of the close message.
-        :param close_msg: The close message.
-        """
-        if self.is_running:
-            _LOGGER.debug("Websocket restarted after close")
-
-            self.ws = websocket.WebSocketApp(
-                self._url,
-                on_open=self.__on_open,
-                on_error=self.__on_error,
-                on_message=self.__on_message,
-                on_close=self.__on_close,
-                on_ping=self.__on_ping,
-                on_pong=self.__on_pong,
-            )
-            self.wst = threading.Thread(
-                target=lambda: self.ws.run_forever(
-                    ping_interval=self.ping_interval,
-                    ping_timeout=self.ping_timeout,
+        while not stop_event.is_set():
+            ws = None
+            connected_at = None
+            welcomed = False
+            try:
+                # The timeout also covers the TLS and websocket handshakes;
+                # without it a stalled handshake blocks this thread forever.
+                ws = websocket.create_connection(
+                    url, timeout=self.connect_timeout
                 )
-            )
-            self.wst.daemon = True
-            self.wst.start()
+                with self._lock:
+                    self.ws = ws
+                _LOGGER.debug("Websocket open")
+                connected_at = time.monotonic()
+                if not stop_event.is_set():
+                    welcomed = self._listen(ws, stop_event)
+            except (websocket.WebSocketException, OSError) as err:
+                if not stop_event.is_set():
+                    _LOGGER.debug("Websocket error: %s", err)
+            finally:
+                with self._lock:
+                    if self.ws is ws:
+                        self.ws = None
+                if ws is not None:
+                    ws.shutdown()
 
-    def __on_message(self, ws, message):
+            if stop_event.is_set():
+                break
+
+            if (
+                welcomed
+                and connected_at is not None
+                and time.monotonic() - connected_at
+                >= STABLE_CONNECTION_SECONDS
+            ):
+                delay = 0
+
+            if not welcomed and self.on_connect_failed:
+                try:
+                    self.on_connect_failed()
+                except Exception as e:
+                    _LOGGER.exception(e)
+                if stop_event.is_set():
+                    break
+
+            _LOGGER.info(
+                "Websocket connection lost, reconnecting in %s seconds", delay
+            )
+            stop_event.wait(delay)
+            delay = min(max(delay * 2, 1), RECONNECT_DELAY_MAX)
+
+    def _listen(
+        self, ws: websocket.WebSocket, stop_event: threading.Event
+    ) -> bool:
+        """
+        Receive messages until the connection is closed or found dead.
+        :return: True if the server welcomed us on this connection.
+        """
+        welcomed = False
+        awaiting_pong = False
+        ws.settimeout(self.ping_interval or None)
+
+        while not stop_event.is_set():
+            try:
+                opcode, frame = ws.recv_data_frame(control_frame=True)
+            except websocket.WebSocketTimeoutException:
+                if awaiting_pong:
+                    _LOGGER.debug("Websocket ping timed out")
+                    return welcomed
+                try:
+                    ws.ping()
+                except (websocket.WebSocketException, OSError) as err:
+                    _LOGGER.debug("Websocket error: %s", err)
+                    return welcomed
+                awaiting_pong = True
+                ws.settimeout(self.ping_timeout)
+                continue
+            except (websocket.WebSocketException, OSError) as err:
+                if not stop_event.is_set():
+                    _LOGGER.debug("Websocket error: %s", err)
+                return welcomed
+
+            if awaiting_pong:
+                awaiting_pong = False
+                ws.settimeout(self.ping_interval or None)
+
+            if opcode == websocket.ABNF.OPCODE_CLOSE:
+                _LOGGER.debug("Websocket closed by server")
+                return welcomed
+            if opcode == websocket.ABNF.OPCODE_TEXT:
+                if self.__on_message(ws, frame.data.decode("utf-8")):
+                    welcomed = True
+
+        return welcomed
+
+    def __on_message(self, ws, message) -> bool:
         """
         This method is called when a message is received from the websocket.
         :param ws: The websocket instance.
         :param message: The message received from the websocket.
+        :return: True if the message was the server's welcome.
         """
         _LOGGER.debug("Websocket data:" + message)
         try:
@@ -595,12 +687,13 @@ class FireServiceRotaIncidents:
                     else:
                         incident["trigger"] = "update"
                         _LOGGER.debug("Incident update received")
-                    self.on_incident(incident)
+                    if self.on_incident:
+                        self.on_incident(incident)
                 else:
                     _LOGGER.debug(f"Malformed data received\n{message}")
             elif message["type"] == "welcome":
                 _LOGGER.debug("Subscribing to the incidents channel")
-                self.ws.send(
+                ws.send(
                     json.dumps(
                         {
                             "command": "subscribe",
@@ -610,22 +703,12 @@ class FireServiceRotaIncidents:
                         }
                     )
                 )
+                return True
             elif message["type"] == "confirm_subscription":
                 _LOGGER.debug("Successfully subscribed to incidents channel")
-            # elif message["type"] == "ping":
-            #     self.ws.send(json.dumps({"type": "pong"}))
-            #     _LOGGER.debug("Ping received on incidents channel, sent a pong")
-            # else:
-            #     _LOGGER.debug(f"Received unknown type: {message}")
         except Exception as e:
             _LOGGER.exception(e)
-
-    def __on_error(self, ws, error):
-        """
-        On Error listener
-        :param error:
-        """
-        _LOGGER.debug("Websocket error: %s", error)
+        return False
 
 
 class ExpiredTokenError(Exception):

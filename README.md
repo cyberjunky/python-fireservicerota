@@ -109,6 +109,21 @@ while True:
     time.sleep(1)
 ```
 
+The listener reconnects by itself when the connection drops or goes silent.
+The access token is part of the URL, so reconnecting fails once it has expired.
+Pass `on_connect_failed` to get notified of a failed connection attempt, then
+refresh the tokens and call `start` again with the new URL:
+
+```python
+def on_connect_failed():
+    token_info = api.refresh_tokens()
+    listener.start(url=f"wss://www.brandweerrooster.nl/cable?access_token={token_info['access_token']}")
+
+listener = FireServiceRotaIncidents(
+    on_incident=on_incident, on_connect_failed=on_connect_failed
+)
+```
+
 ### Pagers
 
 ```python
@@ -180,4 +195,3 @@ Questions, ideas or just want to chat? Join The Junkyard on Discord:
   <img src="https://raw.githubusercontent.com/cyberjunky/cyberjunky/main/assets/junkyard-discord.svg"
        alt="Join The Junkyard on Discord" width="600">
 </a>
-
