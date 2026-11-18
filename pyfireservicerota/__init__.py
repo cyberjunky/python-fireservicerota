@@ -511,7 +511,10 @@ class FireServiceRotaIncidents:
         self._url: str | None = None
         self._recent_incidents: deque = deque(maxlen=30)
         self._stop_event = threading.Event()
-        self._lock = threading.Lock()
+        # Guards start(), stop() and the hand-over of a new socket
+        self._lock = threading.RLock()
+        # Lets start() recognise a call made from a listener thread
+        self._local = threading.local()
 
     def start(
         self,
@@ -523,26 +526,36 @@ class FireServiceRotaIncidents:
         increasing delay, until `stop` is called.
         :param url: The URL of the websocket server.
         """
-        if self.is_running:
-            self.stop()
+        with self._lock:
+            # A restart requested from on_connect_failed must not undo a
+            # stop() or replace a start() that happened in the meantime.
+            own_stop_event = getattr(self._local, "stop_event", None)
+            if own_stop_event is not None and own_stop_event.is_set():
+                _LOGGER.debug("Ignoring start from a stopped listener")
+                return
 
-        self._url = url
-        self._recent_incidents = deque(maxlen=30)
+            if self.is_running:
+                self.stop()
 
-        _LOGGER.debug("Websocket client start")
+            self._url = url
+            recent_incidents: deque = deque(maxlen=30)
+            self._recent_incidents = recent_incidents
 
-        # Every run gets its own stop event, so a thread that is still
-        # winding down after stop() can never be revived by a later start().
-        stop_event = threading.Event()
-        self._stop_event = stop_event
-        self.is_running = True
-        self.wst = threading.Thread(
-            target=self._run,
-            args=(url, stop_event),
-            name="fireservicerota-incidents",
-            daemon=True,
-        )
-        self.wst.start()
+            _LOGGER.debug("Websocket client start")
+
+            # Every run gets its own stop event and incident cache, so a
+            # thread that is still winding down after stop() can never be
+            # revived by, or leak into, a later start().
+            stop_event = threading.Event()
+            self._stop_event = stop_event
+            self.is_running = True
+            self.wst = threading.Thread(
+                target=self._run,
+                args=(url, stop_event, recent_incidents),
+                name="fireservicerota-incidents",
+                daemon=True,
+            )
+            self.wst.start()
 
     def stop(self):
         """
@@ -550,9 +563,9 @@ class FireServiceRotaIncidents:
         This method closes the websocket connection and prevents any further
         reconnect attempts.
         """
-        self.is_running = False
-        self._stop_event.set()
         with self._lock:
+            self.is_running = False
+            self._stop_event.set()
             ws = self.ws
         if ws is not None:
             try:
@@ -562,8 +575,11 @@ class FireServiceRotaIncidents:
                 _LOGGER.debug("Websocket abort failed: %s", err)
         _LOGGER.debug("Websocket client stopped")
 
-    def _run(self, url: str, stop_event: threading.Event) -> None:
+    def _run(
+        self, url: str, stop_event: threading.Event, recent_incidents: deque
+    ) -> None:
         """Connect, listen and reconnect until stopped."""
+        self._local.stop_event = stop_event
         delay = 0
 
         while not stop_event.is_set():
@@ -576,21 +592,31 @@ class FireServiceRotaIncidents:
                 ws = websocket.create_connection(
                     url, timeout=self.connect_timeout
                 )
+                # stop() sets the event under the same lock, so a stopped
+                # run never publishes its socket over that of a newer run.
                 with self._lock:
-                    self.ws = ws
-                _LOGGER.debug("Websocket open")
-                connected_at = time.monotonic()
-                if not stop_event.is_set():
-                    welcomed = self._listen(ws, stop_event)
+                    published = not stop_event.is_set()
+                    if published:
+                        self.ws = ws
+                if published:
+                    _LOGGER.debug("Websocket open")
+                    connected_at = time.monotonic()
+                    welcomed = self._listen(ws, stop_event, recent_incidents)
             except (websocket.WebSocketException, OSError) as err:
                 if not stop_event.is_set():
                     _LOGGER.debug("Websocket error: %s", err)
+            except Exception:
+                # Whatever happens, this thread must survive to reconnect
+                _LOGGER.exception("Unexpected websocket error")
             finally:
                 with self._lock:
-                    if self.ws is ws:
+                    if ws is not None and self.ws is ws:
                         self.ws = None
                 if ws is not None:
-                    ws.shutdown()
+                    try:
+                        ws.shutdown()
+                    except OSError as err:
+                        _LOGGER.debug("Websocket shutdown failed: %s", err)
 
             if stop_event.is_set():
                 break
@@ -618,7 +644,10 @@ class FireServiceRotaIncidents:
             delay = min(max(delay * 2, 1), RECONNECT_DELAY_MAX)
 
     def _listen(
-        self, ws: websocket.WebSocket, stop_event: threading.Event
+        self,
+        ws: websocket.WebSocket,
+        stop_event: threading.Event,
+        recent_incidents: deque,
     ) -> bool:
         """
         Receive messages until the connection is closed or found dead.
@@ -648,6 +677,9 @@ class FireServiceRotaIncidents:
                     _LOGGER.debug("Websocket error: %s", err)
                 return welcomed
 
+            if stop_event.is_set():
+                break
+
             if awaiting_pong:
                 awaiting_pong = False
                 ws.settimeout(self.ping_interval or None)
@@ -656,16 +688,19 @@ class FireServiceRotaIncidents:
                 _LOGGER.debug("Websocket closed by server")
                 return welcomed
             if opcode == websocket.ABNF.OPCODE_TEXT:
-                if self.__on_message(ws, frame.data.decode("utf-8")):
+                if self.__on_message(
+                    ws, frame.data.decode("utf-8"), recent_incidents
+                ):
                     welcomed = True
 
         return welcomed
 
-    def __on_message(self, ws, message) -> bool:
+    def __on_message(self, ws, message, recent_incidents: deque) -> bool:
         """
         This method is called when a message is received from the websocket.
         :param ws: The websocket instance.
         :param message: The message received from the websocket.
+        :param recent_incidents: Ids of the incidents seen during this run.
         :return: True if the message was the server's welcome.
         """
         _LOGGER.debug("Websocket data:" + message)
@@ -680,8 +715,8 @@ class FireServiceRotaIncidents:
                     incident = message["message"]
                     # mark new vs update messages
                     incident_id = incident["id"]
-                    if incident_id not in self._recent_incidents:
-                        self._recent_incidents.append(incident_id)
+                    if incident_id not in recent_incidents:
+                        recent_incidents.append(incident_id)
                         incident["trigger"] = "new"
                         _LOGGER.debug("New incident received")
                     else:
