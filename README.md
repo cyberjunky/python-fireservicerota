@@ -97,17 +97,35 @@ api.set_incident_response(incident_id, True)
 import time
 from pyfireservicerota import FireServiceRotaIncidents
 
+WSS_URL = "wss://www.brandweerrooster.nl/cable?access_token={}"
+last_refresh = 0.0
+
 def on_incident(data):
     print(f"Incident received: {data}")
 
-wsurl = f"wss://www.brandweerrooster.nl/cable?access_token={token_info['access_token']}"
+def on_connect_failed():
+    # Called after every failed attempt, so refresh at most once a minute
+    # and leave the other retries to the listener.
+    global last_refresh
+    if time.monotonic() - last_refresh < 60:
+        return
+    last_refresh = time.monotonic()
+    token_info = api.refresh_tokens()
+    listener.start(url=WSS_URL.format(token_info["access_token"]))
 
-listener = FireServiceRotaIncidents(on_incident=on_incident)
-listener.start(url=wsurl)
+listener = FireServiceRotaIncidents(
+    on_incident=on_incident, on_connect_failed=on_connect_failed
+)
+listener.start(url=WSS_URL.format(token_info["access_token"]))
 
 while True:
     time.sleep(1)
 ```
+
+The listener reconnects by itself when the connection drops or goes silent.
+The access token is part of the URL, so reconnecting fails once it has expired.
+The optional `on_connect_failed` callback is called after a failed connection
+attempt; use it to refresh the tokens and call `start` with the new URL.
 
 ### Pagers
 
@@ -180,4 +198,3 @@ Questions, ideas or just want to chat? Join The Junkyard on Discord:
   <img src="https://raw.githubusercontent.com/cyberjunky/cyberjunky/main/assets/junkyard-discord.svg"
        alt="Join The Junkyard on Discord" width="600">
 </a>
-
