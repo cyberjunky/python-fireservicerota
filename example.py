@@ -36,9 +36,9 @@ if not email or not password:
     sys.exit(1)
 
 api = FireServiceRota(
-      base_url="www.brandweerrooster.nl",
-      username=email,
-      password=password,
+    base_url="www.brandweerrooster.nl",
+    username=email,
+    password=password,
 )
 
 _LOGGER.info("TEST: Requesting API tokens")
@@ -80,7 +80,9 @@ incident_id = incidents[0]["id"] if incidents else None
 if not incident_id:
     _LOGGER.info("Skipping incident response tests, no incidents available")
 else:
-    _LOGGER.info("TEST: Getting incident response status for incident %s", incident_id)
+    _LOGGER.info(
+        "TEST: Getting incident response status for incident %s", incident_id
+    )
     try:
         _LOGGER.info(api.get_incident_response(incident_id))
     except ExpiredTokenError:
@@ -96,7 +98,10 @@ else:
         except InvalidAuthError:
             _LOGGER.debug("Invalid refresh token, you need to re-login")
 
-    _LOGGER.info("TEST: Setting incident response to acknowledged for incident %s", incident_id)
+    _LOGGER.info(
+        "TEST: Setting incident response to acknowledged for incident %s",
+        incident_id,
+    )
     try:
         api.set_incident_response(incident_id, True)
     except ExpiredTokenError:
@@ -120,22 +125,33 @@ if pagers:
     pager_id = pagers[0]["id"]
 
     _LOGGER.info("TEST: Sending test message to pager %s", pager_id)
-    result = api.send_pager_message(pager_id, "Test message from pyfireservicerota", confirmation=True)
+    result = api.send_pager_message(
+        pager_id, "Test message from pyfireservicerota", confirmation=True
+    )
     if result:
-        _LOGGER.info("Message sent: id=%s acknowledgment_state=%s address=%s", result["id"], result["acknowledgment_state"], result.get("address"))
+        _LOGGER.info(
+            "Message sent: id=%s acknowledgment_state=%s address=%s",
+            result["id"],
+            result["acknowledgment_state"],
+            result.get("address"),
+        )
 
-        _LOGGER.info("TEST: Polling delivery status for message %s", result["id"])
+        _LOGGER.info(
+            "TEST: Polling delivery status for message %s", result["id"]
+        )
         status = api.get_pager_message_status(pager_id, result["id"])
         if status:
             _LOGGER.info("Delivery status: %s", status["acknowledgment_state"])
 else:
     _LOGGER.info("No pagers linked to this account")
 
-_LOGGER.info("TEST: Connecting to WebSocket for real-time incident notifications")
+_LOGGER.info(
+    "TEST: Connecting to WebSocket for real-time incident notifications"
+)
 wsurl = f"wss://www.brandweerrooster.nl/cable?access_token={token_info['access_token']}"
 
-class FireService():
 
+class FireService:
     def __init__(self, url):
 
         self._data = None

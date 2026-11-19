@@ -18,11 +18,18 @@ repos:
       - tomli
     exclude: 'cassettes/'
 
+- repo: https://github.com/astral-sh/ruff-pre-commit
+  rev: v0.15.14
+  hooks:
+  - id: ruff-check
+    args: [--fix]
+  - id: ruff-format
+
 - repo: local
   hooks:
-  - id: lint
-    name: lint
-    entry: make lint
+  - id: mypy
+    name: mypy
+    entry: .venv/bin/mypy pyfireservicerota
     types: [python]
     language: system
     pass_filenames: false

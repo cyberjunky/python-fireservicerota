@@ -1,37 +1,38 @@
 .DEFAULT_GOAL := all
-sources = pyfireservicerota
+sources = pyfireservicerota tests example.py
 venv = .venv/bin
 
 .PHONY: .pre-commit  ## Check that pre-commit is installed
 .pre-commit:
 	@pre-commit -V || echo 'Please install pre-commit: https://pre-commit.com/'
 
-.PHONY: install  ## Install linting tools and pre-commit hooks
+.PHONY: install  ## Install the package, dev tools and pre-commit hooks
 install: .venv .pre-commit
-	$(venv)/pip install -q ruff mypy isort black types-requests
 	pre-commit install --install-hooks
 
 .PHONY: format  ## Auto-format python source files
 format: .venv
-	$(venv)/isort $(sources)
-	$(venv)/black -l 79 $(sources)
-	$(venv)/ruff check $(sources)
+	$(venv)/ruff check --fix $(sources)
+	$(venv)/ruff format $(sources)
 
 .PHONY: lint  ## Lint python source files
 lint: .venv
-	$(venv)/isort --check-only $(sources)
+	$(venv)/ruff format --check --diff $(sources)
 	$(venv)/ruff check $(sources)
-	$(venv)/black -l 79 $(sources) --check --diff
-	$(venv)/mypy $(sources)
+	$(venv)/mypy pyfireservicerota
+
+.PHONY: test  ## Run the test suite with coverage
+test: .venv
+	$(venv)/pytest --cov=pyfireservicerota --cov-report=term-missing
 
 .PHONY: codespell  ## Use Codespell to do spellchecking
 codespell: .pre-commit
 	pre-commit run codespell --all-files
 
-.PHONY: .venv  ## Create virtual environment with linting tools
+.PHONY: .venv  ## Create virtual environment with the dev tools
 .venv:
-	python3 -m venv .venv --upgrade-deps
-	$(venv)/pip install -q ruff mypy isort black types-requests
+	test -x $(venv)/python || python3 -m venv .venv --upgrade-deps
+	$(venv)/pip install -q -r requirements-dev.txt
 
 .PHONY: publish  ## Publish to PyPi
 publish:
@@ -40,7 +41,7 @@ publish:
 	twine upload dist/*
 
 .PHONY: all  ## Run the standard set of checks performed in CI
-all: lint codespell
+all: lint test codespell
 
 .PHONY: clean  ## Clear local caches and build artifacts
 clean:
@@ -52,6 +53,7 @@ clean:
 	rm -rf .mypy_cache
 	rm -rf .pdm-build
 	rm -rf .pytest_cache
+	rm -f .coverage coverage.xml
 	rm -rf .ruff_cache
 	rm -rf *.egg-info
 	rm -rf build
