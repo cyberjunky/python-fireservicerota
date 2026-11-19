@@ -1,0 +1,2 @@
+# Development tools; the list itself lives in the "dev" extra in pyproject.toml
+-e .[dev]

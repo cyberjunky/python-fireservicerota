@@ -6,6 +6,7 @@ import logging
 import threading
 import time
 from collections import deque
+from urllib.parse import parse_qs, urlsplit
 
 import oauthlib.oauth2
 import pytz
@@ -49,23 +50,16 @@ class FireServiceRota:
             username=self._username, password=self._password
         )
 
-        try:
-            token_info = self._request(
-                "POST",
-                endpoint="oauth/token",
-                log_msg_action="request tokens",
-                params=request_body,
-                auth_request=True,
-            )
-            if isinstance(token_info, dict):
-                self._token_info = token_info
-
-            _LOGGER.debug(
-                f"Obtained tokens: access {self._token_info['access_token']}, "
-                f"refresh {self._token_info['refresh_token']}"
-            )
-        except (KeyError, TypeError) as err:
-            _LOGGER.debug(f"Error obtaining tokens: {err}")
+        token_info = self._request(
+            "POST",
+            endpoint="oauth/token",
+            log_msg_action="request tokens",
+            form=request_body,
+            auth_request=True,
+        )
+        if isinstance(token_info, dict):
+            self._token_info = token_info
+            _LOGGER.debug("Obtained access tokens")
 
         return self._token_info
 
@@ -81,20 +75,16 @@ class FireServiceRota:
         request_body = oauth_client.prepare_refresh_body(
             refresh_token=self._token_info["refresh_token"]
         )
-        try:
-            token_info = self._request(
-                "POST",
-                endpoint="oauth/token",
-                log_msg_action="refresh tokens",
-                params=request_body,
-                auth_request=True,
-            )
-
-            if isinstance(token_info, dict):
-                self._token_info = token_info
+        token_info = self._request(
+            "POST",
+            endpoint="oauth/token",
+            log_msg_action="refresh tokens",
+            form=request_body,
+            auth_request=True,
+        )
+        if isinstance(token_info, dict):
+            self._token_info = token_info
             _LOGGER.debug("Refreshed access tokens")
-        except (KeyError, TypeError) as err:
-            _LOGGER.debug(f"Error refreshing tokens: {err}")
 
         return self._token_info
 
@@ -118,8 +108,8 @@ class FireServiceRota:
         :param tz: The timezone of the user.
         :return: The user schedules.
         """
-        if not self._user:
-            self.get_user()
+        if not self._user and not self.get_user():
+            return None
 
         today = datetime.datetime.now(tz)
         tomorrow = today + datetime.timedelta(days=1)
@@ -200,8 +190,8 @@ class FireServiceRota:
         :param id: The ID of the incident.
         :return: The incident response.
         """
-        if not self._user:
-            self.get_user()
+        if not self._user and not self.get_user():
+            return None
 
         endpoint = f"incidents/{id}"
 
@@ -262,9 +252,11 @@ class FireServiceRota:
 
                         if interval["assigned_function_ids"]:
                             for func in interval["assigned_function_ids"]:
-                                interval["assigned_function"] = (
-                                    self.get_standby_function(func)["name"]
-                                )
+                                function = self.get_standby_function(func)
+                                if function:
+                                    interval["assigned_function"] = function[
+                                        "name"
+                                    ]
 
                         return interval
 
@@ -346,6 +338,7 @@ class FireServiceRota:
         params: dict | None = None,
         body: dict | None = None,
         auth_request: bool = False,
+        form: str | None = None,
     ) -> dict | list | None:
         """
         Make a request to the FireServiceRota API.
@@ -355,24 +348,34 @@ class FireServiceRota:
         :param params: The parameters of the request.
         :param body: The body of the request.
         :param auth_request: The authentication request.
+        :param form: URL-encoded form sent as the request body. Used for
+            credentials, which must stay out of the URL because URLs end up
+            in logs and error messages.
         :return: The response of the request.
         """
         url = f"{self._base_url}/{endpoint}"
-        headers = dict()
+        headers: dict = {}
         response: requests.Response | None = None
-        json_payload: dict = {}
         params = params or {}
 
         if not auth_request:
+            if "access_token" not in self._token_info:
+                raise InvalidTokenError(
+                    "No access token; request tokens first"
+                )
             url = f"{self._base_url}/api/v2/{endpoint}"
             headers = {
                 "Content-Type": "application/json;charset=UTF-8",
                 "Authorization": f"Bearer {self._token_info['access_token']}",
             }
+        elif form is not None:
+            headers = {"Content-Type": "application/x-www-form-urlencoded"}
 
+        # Never log headers, the form or response bodies of auth requests:
+        # they carry the password and the tokens.
         _LOGGER.debug(
             f"Making request to {endpoint} endpoint to {log_msg_action}, "
-            f"url: {url}, headers: {headers}, params: {params}, body: {body}"
+            f"url: {url}, params: {params}"
         )
 
         try:
@@ -382,87 +385,66 @@ class FireServiceRota:
                 headers=headers,
                 params=params,
                 json=body or None,
+                data=form,
                 timeout=10,
             )
 
-            _LOGGER.debug(
-                "Request response: %s: %s",
-                response.status_code,
-                response.json(),
-            )
+            if auth_request:
+                _LOGGER.debug("Request response: %s", response.status_code)
+            else:
+                _LOGGER.debug(
+                    "Request response: %s: %s",
+                    response.status_code,
+                    response.json(),
+                )
 
             response.raise_for_status()
             return response.json()
         except HTTPError as err:
-            if response is not None:
-                try:
-                    json_payload = response.json()
-                except json.decoder.JSONDecodeError:
-                    _LOGGER.error("Invalid JSON payload received")
+            # Only raise_for_status() raises this, so there is a response
+            assert response is not None
+            status = response.status_code
+            try:
+                payload = response.json()
+            except json.decoder.JSONDecodeError:
+                payload = None
+            error = payload.get("error") if isinstance(payload, dict) else None
 
-            if auth_request:
-                if (
-                    response is not None
-                    and response.status_code == 401
-                    and json_payload.get("error") == "invalid_grant"
-                ):
+            if status == 401:
+                if auth_request and error == "invalid_grant":
                     raise InvalidAuthError(
                         "Invalid credentials or refresh token invalid"
-                    )
-                else:
-                    if response:
-                        _LOGGER.error(
-                            f"Error requesting authorization: "
-                            f"{response.status_code}: {json_payload}"
-                        )
-            elif response is not None and response.status_code == 401:
-                error = json_payload.get("error")
-                if error == "token_invalid":
-                    raise InvalidTokenError(
-                        "Access token invalid; re-authentication required"
-                    )
-                elif error == "token_revoked":
-                    raise ExpiredTokenError(
-                        "Access token revoked; token refresh required"
-                    )
-                elif error == "token_expired":
-                    raise ExpiredTokenError(
-                        "Access token expired; token refresh required"
-                    )
-                else:
-                    _LOGGER.error(
-                        f"Error {err} while attempting to {log_msg_action}"
-                    )
-            else:
-                if response:
-                    _LOGGER.error(
-                        f"Error while attempting to {log_msg_action}: "
-                        f"{response.status_code}: {json_payload}"
-                    )
-                else:
-                    _LOGGER.error(
-                        f"Error {err} connecting while attempting to {log_msg_action}"
-                    )
+                    ) from err
+                if not auth_request and error in _TOKEN_ERRORS:
+                    exception, text = _TOKEN_ERRORS[error]
+                    raise exception(text) from err
+            # Auth responses may carry credentials: log the error code only
+            _LOGGER.error(
+                f"Error while attempting to {log_msg_action}: "
+                f"{status}: {error if auth_request else payload}"
+            )
         except Timeout:
             _LOGGER.error(
                 f"Connection timed out while attempting to {log_msg_action}, "
                 f"possible connectivity outage"
             )
-        except (
-            RequestException,
-            json.decoder.JSONDecodeError,
-            ConnectionError,
-        ) as err:
-            if response:
-                _LOGGER.error(
-                    f"Error connecting while attempting to {log_msg_action}, "
-                    f"{response.status_code}: {json_payload}"
-                )
-            else:
-                _LOGGER.error(
-                    f"Error {err} connecting while attempting to {log_msg_action}"
-                )
+        except (RequestException, json.decoder.JSONDecodeError) as err:
+            _LOGGER.error(
+                f"Error {err} connecting while attempting to {log_msg_action}"
+            )
         return None
+
+
+def _redact(error: object, url: str) -> str:
+    """Return the error text with the access token in the URL removed."""
+    text = str(error)
+    query = urlsplit(url).query
+    if query:
+        text = text.replace(query, "<redacted>")
+        for values in parse_qs(query).values():
+            for value in values:
+                text = text.replace(value, "<redacted>")
+    return text
 
 
 # Incidents are not replayed by the server, so every second offline counts:
@@ -601,13 +583,20 @@ class FireServiceRotaIncidents:
                 if published:
                     _LOGGER.debug("Websocket open")
                     connected_at = time.monotonic()
-                    welcomed = self._listen(ws, stop_event, recent_incidents)
+                    welcomed = self._listen(
+                        ws, stop_event, recent_incidents, url
+                    )
             except (websocket.WebSocketException, OSError) as err:
                 if not stop_event.is_set():
-                    _LOGGER.debug("Websocket error: %s", err)
-            except Exception:
-                # Whatever happens, this thread must survive to reconnect
-                _LOGGER.exception("Unexpected websocket error")
+                    _LOGGER.debug("Websocket error: %s", _redact(err, url))
+            except Exception as err:
+                # Whatever happens, this thread must survive to reconnect.
+                # No traceback: its messages may quote the URL and token.
+                _LOGGER.error(
+                    "Unexpected websocket error: %s: %s",
+                    type(err).__name__,
+                    _redact(err, url),
+                )
             finally:
                 with self._lock:
                     if ws is not None and self.ws is ws:
@@ -648,6 +637,7 @@ class FireServiceRotaIncidents:
         ws: websocket.WebSocket,
         stop_event: threading.Event,
         recent_incidents: deque,
+        url: str = "",
     ) -> bool:
         """
         Receive messages until the connection is closed or found dead.
@@ -667,14 +657,14 @@ class FireServiceRotaIncidents:
                 try:
                     ws.ping()
                 except (websocket.WebSocketException, OSError) as err:
-                    _LOGGER.debug("Websocket error: %s", err)
+                    _LOGGER.debug("Websocket error: %s", _redact(err, url))
                     return welcomed
                 awaiting_pong = True
                 ws.settimeout(self.ping_timeout)
                 continue
             except (websocket.WebSocketException, OSError) as err:
                 if not stop_event.is_set():
-                    _LOGGER.debug("Websocket error: %s", err)
+                    _LOGGER.debug("Websocket error: %s", _redact(err, url))
                 return welcomed
 
             if stop_event.is_set():
@@ -687,11 +677,10 @@ class FireServiceRotaIncidents:
             if opcode == websocket.ABNF.OPCODE_CLOSE:
                 _LOGGER.debug("Websocket closed by server")
                 return welcomed
-            if opcode == websocket.ABNF.OPCODE_TEXT:
-                if self.__on_message(
-                    ws, frame.data.decode("utf-8"), recent_incidents
-                ):
-                    welcomed = True
+            if opcode == websocket.ABNF.OPCODE_TEXT and self.__on_message(
+                ws, frame.data.decode("utf-8"), recent_incidents
+            ):
+                welcomed = True
 
         return welcomed
 
@@ -749,16 +738,27 @@ class FireServiceRotaIncidents:
 class ExpiredTokenError(Exception):
     """Raised when fireservicerota API returns a code indicating expired tokens."""
 
-    pass
-
 
 class InvalidTokenError(Exception):
     """Raised when fireservicerota API returns a code indicating invalid tokens."""
-
-    pass
 
 
 class InvalidAuthError(Exception):
     """Raised when fireservicerota API returns a code indicating invalid credentials."""
 
-    pass
+
+# The "error" codes of a 401 response and the exception each one raises
+_TOKEN_ERRORS = {
+    "token_invalid": (
+        InvalidTokenError,
+        "Access token invalid; re-authentication required",
+    ),
+    "token_revoked": (
+        ExpiredTokenError,
+        "Access token revoked; token refresh required",
+    ),
+    "token_expired": (
+        ExpiredTokenError,
+        "Access token expired; token refresh required",
+    ),
+}

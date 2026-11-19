@@ -1,0 +1,5 @@
+# Runtime dependencies; keep in sync with [project.dependencies] in pyproject.toml
+pytz
+oauthlib
+requests
+websocket-client
