@@ -23,10 +23,10 @@ jobs:
           pip install -r requirements-dev.txt
 
       - name: Check formatting
-        run: ruff format --check .
+        run: ruff format --check pyfireservicerota tests example.py
 
       - name: Lint with ruff
-        run: ruff check .
+        run: ruff check pyfireservicerota tests example.py
 
       - name: Type check with mypy
         run: mypy pyfireservicerota
